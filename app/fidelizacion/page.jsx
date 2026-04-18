@@ -53,8 +53,8 @@ export default function FidelizacionPage() {
           email:  authUser.email,
         },
         lealtad: {
-          puntos:                 200,
-          puntos_acumulados_total: 200,
+          puntos:                 1,
+          puntos_acumulados_total: 1,
           tier:                   'bronze',
         },
         metadata: {
@@ -72,8 +72,8 @@ export default function FidelizacionPage() {
       await addDoc(collection(db, 'usuarios', authUser.uid, 'transacciones_lealtad'), {
         tipo:             'earn',
         motivo:           'bienvenida',
-        puntos:           200,
-        saldo_resultante: 200,
+        puntos:           1,
+        saldo_resultante: 1,
         timestamp:        serverTimestamp(),
         metadata: {
           descripcion:  'Puntos de bienvenida',
