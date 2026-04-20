@@ -1,10 +1,11 @@
 'use client';
-// components/TarjetaFidelizacion.jsx — v5
+// components/TarjetaFidelizacion.jsx — v6
 
 import { useState, useEffect, useRef } from 'react';
 import {
   getUsuario, getHistorialPuntos, canjearRecompensa,
   crearAccionPendiente, generarLinkReferido,
+  guardarFechaNacimiento, verificarCumpleanos,
   NIVELES, TOTAL_SELLOS, REGLA_COMPRA,
 } from '../lib/puntos';
 
@@ -37,23 +38,18 @@ const TIER_COLORS = {
   gold:   { from: '#F7D98B', to: '#D4A96A' },
 };
 
-// ─── Calcular progreso CORRECTO entre niveles ─────────────────────────────────
-//
-// FIX: antes calculaba pts / proxNivel.puntos → daba 100% con 5/5 aunque
-// el nivel fuera el primero. Ahora calcula desde el nivel anterior:
-//   progreso = (pts - ptsNivelAnterior) / (ptsProxNivel - ptsNivelAnterior)
-//
+// ─── Calcular progreso entre niveles ─────────────────────────────────────────
 function calcularProgreso(pts, niveles) {
   const proxNivel = niveles.find(n => pts < n.puntos);
   if (!proxNivel) return { progreso: 100, proxNivel: null, ptsFaltan: 0, ptsDesde: 0 };
 
-  const idxProx      = niveles.indexOf(proxNivel);
-  const nivelPrevio  = idxProx > 0 ? niveles[idxProx - 1] : null;
-  const ptsDesde     = nivelPrevio ? nivelPrevio.puntos : 0;
-  const rango        = proxNivel.puntos - ptsDesde;
-  const avance       = pts - ptsDesde;
-  const progreso     = Math.min(Math.max((avance / rango) * 100, 0), 100);
-  const ptsFaltan    = proxNivel.puntos - pts;
+  const idxProx     = niveles.indexOf(proxNivel);
+  const nivelPrevio = idxProx > 0 ? niveles[idxProx - 1] : null;
+  const ptsDesde    = nivelPrevio ? nivelPrevio.puntos : 0;
+  const rango       = proxNivel.puntos - ptsDesde;
+  const avance      = pts - ptsDesde;
+  const progreso    = Math.min(Math.max((avance / rango) * 100, 0), 100);
+  const ptsFaltan   = proxNivel.puntos - pts;
 
   return { progreso, proxNivel, ptsFaltan, ptsDesde };
 }
@@ -120,7 +116,7 @@ function ModalPremio({ nivel, onConfirmar, onCerrar, canjeando }) {
 
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(45,27,46,0.55)', backdropFilter: 'blur(12px)', display: 'flex', alignItems: 'flex-end', zIndex: 300 }} onClick={onCerrar}>
-      <div style={{ background: C.white, borderRadius: '28px 28px 0 0', padding: '10px 22px 52px', width: '100%', maxWidth: 430, width: '100%', margin: '0 auto', boxShadow: '0 -8px 40px rgba(45,27,46,0.14)' }} onClick={e => e.stopPropagation()}>
+      <div style={{ background: C.white, borderRadius: '28px 28px 0 0', padding: '10px 22px 52px', width: '100%', maxWidth: 430, margin: '0 auto', boxShadow: '0 -8px 40px rgba(45,27,46,0.14)' }} onClick={e => e.stopPropagation()}>
         <div style={{ width: 36, height: 4, background: C.border, borderRadius: 99, margin: '0 auto 20px' }} />
         <div style={{ textAlign: 'center', marginBottom: 20 }}>
           <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: `linear-gradient(135deg,${t.from},${t.to})`, borderRadius: 99, padding: '5px 16px', fontSize: 12, fontWeight: 700, color: '#fff', marginBottom: 10, boxShadow: '0 2px 8px rgba(0,0,0,0.12)' }}>
@@ -207,21 +203,24 @@ function ModalSolicitud({ tipo, onConfirmar, onCerrar, enviando }) {
   const [preview, setPreview]       = useState(null);
   const fileRef = useRef();
 
+  // FIX: si cfg es undefined (tipo inesperado), no renderizar nada
+  const cfgMap = {
+    resena_google: { emoji: '⭐', titulo: 'Reseña en Google',      pts: '+1 pt',  color: '#FFD97D'  },
+    historia_ig:   { emoji: '📸', titulo: 'Historia en Instagram', pts: '+½ pt', color: C.lavender },
+  };
+  const cfg = cfgMap[tipo];
+  if (!cfg) return null;
+
   function handleImagen(e) { const f = e.target.files[0]; if (!f) return; setImagenFile(f); setPreview(URL.createObjectURL(f)); }
-  function handleSubmit()  {
+  function handleSubmit() {
     if (tipo === 'resena_google' && !linkResena.trim()) return;
     if (tipo === 'historia_ig'  && !imagenFile)         return;
     onConfirmar({ linkResena, handleIg, imagenFile });
   }
 
-  const cfg = {
-    resena_google: { emoji: '⭐', titulo: 'Reseña en Google',      pts: '+1 pt',  color: '#FFD97D' },
-    historia_ig:   { emoji: '📸', titulo: 'Historia en Instagram', pts: '+½ pt', color: C.lavender },
-  }[tipo];
-
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(45,27,46,0.5)', backdropFilter: 'blur(10px)', display: 'flex', alignItems: 'flex-end', zIndex: 300 }} onClick={onCerrar}>
-      <div style={{ background: C.white, borderRadius: '28px 28px 0 0', padding: '10px 24px 52px', width: '100%', maxWidth: 430, width: '100%', margin: '0 auto', boxShadow: '0 -8px 40px rgba(45,27,46,0.12)' }} onClick={e => e.stopPropagation()}>
+      <div style={{ background: C.white, borderRadius: '28px 28px 0 0', padding: '10px 24px 52px', width: '100%', maxWidth: 430, margin: '0 auto', boxShadow: '0 -8px 40px rgba(45,27,46,0.12)' }} onClick={e => e.stopPropagation()}>
         <div style={{ width: 36, height: 4, background: C.border, borderRadius: 99, margin: '0 auto 22px' }} />
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 18 }}>
           <div>
@@ -263,6 +262,52 @@ function ModalSolicitud({ tipo, onConfirmar, onCerrar, enviando }) {
   );
 }
 
+// ─── Modal cumpleaños ─────────────────────────────────────────────────────────
+function ModalCumpleanos({ fechaActual, onGuardar, onCerrar, guardando }) {
+  const [fecha, setFecha] = useState(fechaActual || '');
+
+  function handleChange(e) {
+    let v = e.target.value.replace(/[^0-9/]/g, '');
+    if (v.length === 2 && !v.includes('/') && fecha.length < 2) v = v + '/';
+    if (v.length > 5) return;
+    setFecha(v);
+  }
+
+  const valido = fecha.length === 5 && fecha.includes('/');
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(45,27,46,0.5)', backdropFilter: 'blur(10px)', display: 'flex', alignItems: 'flex-end', zIndex: 300 }} onClick={onCerrar}>
+      <div style={{ background: C.white, borderRadius: '28px 28px 0 0', padding: '10px 24px 52px', width: '100%', maxWidth: 430, margin: '0 auto', boxShadow: '0 -8px 40px rgba(45,27,46,0.12)' }} onClick={e => e.stopPropagation()}>
+        <div style={{ width: 36, height: 4, background: C.border, borderRadius: 99, margin: '0 auto 22px' }} />
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
+          <div style={{ fontSize: 18, fontWeight: 700, color: C.text, fontFamily: "'Playfair Display', serif" }}>🎂 Tu cumpleaños</div>
+          <button onClick={onCerrar} style={{ background: C.bgSoft, border: 'none', borderRadius: 12, width: 34, height: 34, cursor: 'pointer', color: C.textMid, fontSize: 15, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>✕</button>
+        </div>
+        <p style={{ fontSize: 13, color: C.textSoft, marginBottom: 22, lineHeight: 1.6 }}>
+          Ingresa tu día y mes. Cada año, en tu mes especial, te regalamos <strong style={{ color: C.roseDark }}>+1 punto</strong> automáticamente 🌸
+        </p>
+        <label style={mS.label}>Fecha (DD/MM)</label>
+        <input
+          style={{ ...mS.input, textAlign: 'center', fontSize: 24, letterSpacing: 6, fontWeight: 700 }}
+          value={fecha}
+          onChange={handleChange}
+          placeholder="15/03"
+          maxLength={5}
+        />
+        <div style={{ fontSize: 11, color: C.textSoft, marginBottom: 20, textAlign: 'center' }}>
+          Solo usamos el día y mes — nunca el año.
+        </div>
+        <button
+          disabled={!valido || guardando}
+          onClick={() => valido && onGuardar(fecha)}
+          style={{ width: '100%', background: valido ? `linear-gradient(135deg,${C.rose},${C.roseDark})` : C.border, color: valido ? '#fff' : C.textSoft, border: 'none', borderRadius: 16, padding: 15, fontSize: 15, fontWeight: 700, cursor: valido && !guardando ? 'pointer' : 'not-allowed', boxShadow: valido ? `0 6px 20px rgba(217,96,122,0.3)` : 'none', fontFamily: 'inherit', transition: 'all 0.2s' }}>
+          {guardando ? 'Guardando...' : 'Guardar fecha 🎂'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 const mS = {
   label: { display: 'block', fontSize: 12, color: C.textMid, marginBottom: 6, fontWeight: 600 },
   input: { width: '100%', background: C.bgSoft, border: `1.5px solid ${C.border}`, borderRadius: 12, padding: '12px 14px', color: C.text, fontSize: 14, marginBottom: 14, boxSizing: 'border-box', outline: 'none', fontFamily: 'inherit' },
@@ -282,6 +327,11 @@ export default function TarjetaFidelizacion({ uid, onLogout }) {
   const [canjeando, setCanjeando]           = useState(false);
   const [modalCodigo, setModalCodigo]       = useState(null);
 
+  // Cumpleaños
+  const [modalCumple, setModalCumple]       = useState(false);
+  const [guardandoCumple, setGuardandoCumple] = useState(false);
+  const [cumpleMsg, setCumpleMsg]           = useState(false);
+
   useEffect(() => { cargarDatos(); }, [uid]);
 
   async function cargarDatos() {
@@ -291,6 +341,34 @@ export default function TarjetaFidelizacion({ uid, onLogout }) {
     setHistorial(hist);
     setLinkReferido(generarLinkReferido(uid));
     setCargando(false);
+
+    // Verificar cumpleaños automáticamente al cargar
+    try {
+      const fueCumple = await verificarCumpleanos(uid);
+      if (fueCumple) {
+        setCumpleMsg(true);
+        // Recargar datos para mostrar el punto nuevo
+        const userActualizado = await import('../lib/puntos').then(m => m.getUsuario(uid));
+        setUsuario(userActualizado);
+      }
+    } catch (_) {
+      // No interrumpir el flujo si falla la verificación
+    }
+  }
+
+  async function handleGuardarCumpleanos(fecha) {
+    setGuardandoCumple(true);
+    try {
+      await guardarFechaNacimiento(uid, fecha);
+      setModalCumple(false);
+      mostrarMensaje('🎂 Cumpleaños guardado — te daremos +1 pt en tu mes especial');
+      const userActualizado = await import('../lib/puntos').then(m => m.getUsuario(uid));
+      setUsuario(userActualizado);
+    } catch (e) {
+      mostrarMensaje('Error: ' + e.message);
+    } finally {
+      setGuardandoCumple(false);
+    }
   }
 
   async function handleConfirmarSolicitud({ linkResena, handleIg, imagenFile }) {
@@ -356,15 +434,16 @@ export default function TarjetaFidelizacion({ uid, onLogout }) {
     <div style={{ minHeight: '100vh', background: C.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', color: C.textSoft }}>Usuario no encontrado</div>
   );
 
-  const pts              = usuario?.lealtad?.puntos ?? 0;
-  const ptsTotal         = usuario?.lealtad?.puntos_acumulados_total ?? 0;
-  const sellosLlenos     = Math.min(Math.floor(pts), TOTAL_SELLOS);
-  const nivelesDesbloq   = NIVELES.filter(n => pts >= n.puntos);
-  const nivelActual      = [...NIVELES].reverse().find(n => pts >= n.puntos);
+  const pts            = usuario?.lealtad?.puntos ?? 0;
+  const ptsTotal       = usuario?.lealtad?.puntos_acumulados_total ?? 0;
+  const sellosLlenos   = Math.min(Math.floor(pts), TOTAL_SELLOS);
+  const nivelesDesbloq = NIVELES.filter(n => pts >= n.puntos);
+  const nivelActual    = [...NIVELES].reverse().find(n => pts >= n.puntos);
   const { progreso, proxNivel, ptsFaltan } = calcularProgreso(pts, NIVELES);
-  const urgente          = ptsFaltan > 0 && ptsFaltan <= 1;
-  const nombre           = usuario.perfil?.nombre?.split(' ')[0] || 'amiga';
-  const tier             = TIER_COLORS[nivelActual?.tier] || null;
+  const urgente        = ptsFaltan > 0 && ptsFaltan <= 1;
+  const nombre         = usuario.perfil?.nombre?.split(' ')[0] || 'amiga';
+  const tier           = TIER_COLORS[nivelActual?.tier] || null;
+  const tieneFechaNac  = !!usuario.perfil?.fecha_nacimiento;
 
   return (
     <div style={{ background: C.bg, minHeight: '100vh', maxWidth: 430, width: '100%', margin: '0 auto', fontFamily: "'DM Sans', -apple-system, sans-serif", color: C.text, paddingBottom: 104, position: 'relative' }}>
@@ -392,7 +471,7 @@ export default function TarjetaFidelizacion({ uid, onLogout }) {
 
         {/* Toast */}
         {mensaje && (
-          <div style={{ position: 'fixed', top: 22, left: '50%', background: C.white, border: `1.5px solid ${C.border}`, color: C.roseDark, padding: '12px 20px', borderRadius: 16, fontSize: 13, fontWeight: 700, zIndex: 999, whiteSpace: 'nowrap', boxShadow: '0 8px 28px rgba(45,27,46,.14)', animation: 'bounceIn .4s ease' }}>
+          <div style={{ position: 'fixed', top: 22, left: '50%', transform: 'translateX(-50%)', background: C.white, border: `1.5px solid ${C.border}`, color: C.roseDark, padding: '12px 20px', borderRadius: 16, fontSize: 13, fontWeight: 700, zIndex: 999, whiteSpace: 'nowrap', boxShadow: '0 8px 28px rgba(45,27,46,.14)', animation: 'bounceIn .4s ease' }}>
             {mensaje}
           </div>
         )}
@@ -402,14 +481,12 @@ export default function TarjetaFidelizacion({ uid, onLogout }) {
           <div style={{ position: 'absolute', top: -40, right: -40, width: 140, height: 140, borderRadius: '50%', background: 'radial-gradient(circle,rgba(242,168,184,.22) 0%,transparent 70%)' }} />
           <div style={{ position: 'relative' }}>
 
-            {/* Badge nivel */}
             {nivelActual && tier && (
               <div style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: `linear-gradient(135deg,${tier.from},${tier.to})`, borderRadius: 99, padding: '4px 14px', fontSize: 11, fontWeight: 700, color: '#fff', boxShadow: '0 2px 8px rgba(0,0,0,.12)', marginBottom: 12 }}>
                 ✦ {nivelActual.label}
               </div>
             )}
 
-            {/* Puntos */}
             <div style={{ fontSize: 11, color: C.textSoft, letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 2 }}>puntos disponibles</div>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 2 }}>
               <span style={{ fontSize: 56, fontWeight: 500, color: C.roseDark, lineHeight: 1, fontFamily: "'Playfair Display', serif" }}>
@@ -417,7 +494,6 @@ export default function TarjetaFidelizacion({ uid, onLogout }) {
               </span>
               <span style={{ fontSize: 16, color: C.textSoft }}>pts</span>
             </div>
-            {/* Traducción de puntos a beneficio */}
             <div style={{ fontSize: 12, color: C.textSoft, marginBottom: 4 }}>{ptsTotal} acumulados en total</div>
             <div style={{ fontSize: 12, color: C.textMid, fontWeight: 500, marginBottom: 18 }}>
               {pts >= 12 ? '👑 Nivel máximo — ¡Eres Moonbow Elite!'
@@ -427,7 +503,6 @@ export default function TarjetaFidelizacion({ uid, onLogout }) {
                : ''}
             </div>
 
-            {/* Sellos rutina */}
             <div style={{ fontSize: 11, color: C.textMid, fontWeight: 600, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
               Tu rutina completa
               <span style={{ fontSize: 10, color: C.textSoft, fontWeight: 400 }}>— toca para ver</span>
@@ -438,11 +513,9 @@ export default function TarjetaFidelizacion({ uid, onLogout }) {
               ))}
             </div>
 
-            {/* ── Barra de progreso CORREGIDA ── */}
             {proxNivel && (
               <div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: C.textSoft, marginBottom: 6 }}>
-                  {/* Muestra el inicio del segmento actual, no 0 */}
                   <span>{calcularProgreso(pts, NIVELES).ptsDesde} pts</span>
                   <span style={{ fontWeight: 700, color: urgente ? C.urgent : C.roseDark }}>
                     {urgente
@@ -467,6 +540,18 @@ export default function TarjetaFidelizacion({ uid, onLogout }) {
           </div>
         </div>
 
+        {/* ── Banner cumpleaños ── */}
+        {cumpleMsg && (
+          <div style={{ margin: '0 16px 10px', background: 'linear-gradient(135deg,#FFF0F4,#FFF8F0)', border: `1.5px solid ${C.rose}`, borderRadius: 18, padding: '14px 16px', display: 'flex', alignItems: 'center', gap: 12, boxShadow: '0 4px 16px rgba(242,168,184,.25)', animation: 'slideUp .4s ease' }}>
+            <div style={{ fontSize: 28 }}>🎂</div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 14, fontWeight: 700, color: C.text }}>¡Feliz cumpleaños!</div>
+              <div style={{ fontSize: 12, color: C.textMid, marginTop: 1 }}>Te regalamos +1 pt en tu mes especial 🌸</div>
+            </div>
+            <button onClick={() => setCumpleMsg(false)} style={{ background: 'none', border: 'none', color: C.textSoft, fontSize: 18, cursor: 'pointer', padding: 4 }}>✕</button>
+          </div>
+        )}
+
         {/* Banner recompensa disponible */}
         {nivelesDesbloq.length > 0 && (
           <div style={{ margin: '0 16px 10px', background: 'linear-gradient(135deg,#EDFAF4,#F0FFF8)', border: `1.5px solid ${C.green}60`, borderRadius: 18, padding: '13px 16px', display: 'flex', alignItems: 'center', gap: 12, boxShadow: '0 4px 16px rgba(91,184,150,.15)' }}>
@@ -478,6 +563,25 @@ export default function TarjetaFidelizacion({ uid, onLogout }) {
             <button onClick={() => setVista('canjear')} className="btn-cta"
               style={{ background: `linear-gradient(135deg,${C.green},#3A9E78)`, color: '#fff', border: 'none', borderRadius: 12, padding: '9px 15px', fontSize: 12, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap', boxShadow: '0 4px 12px rgba(91,184,150,.35)', fontFamily: 'inherit' }}>
               Elegir →
+            </button>
+          </div>
+        )}
+
+        {/* ── Card cumpleaños (siempre visible en vista tarjeta) ── */}
+        {vista === 'tarjeta' && (
+          <div style={{ margin: '0 16px 10px', background: C.white, borderRadius: 18, padding: '14px 16px', border: `1px solid ${C.border}`, boxShadow: '0 2px 8px rgba(45,27,46,.04)', display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div style={{ width: 40, height: 40, borderRadius: 12, background: `${C.peach}25`, border: `1px solid ${C.peach}50`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, flexShrink: 0 }}>🎂</div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: C.text }}>Tu cumpleaños</div>
+              <div style={{ fontSize: 11, color: C.textSoft, marginTop: 1 }}>
+                {tieneFechaNac
+                  ? `Registrado: ${usuario.perfil.fecha_nacimiento} · +1 pt automático 🌸`
+                  : 'Agrégalo y recibe +1 pt en tu mes especial'}
+              </div>
+            </div>
+            <button onClick={() => setModalCumple(true)} className="btn-cta"
+              style={{ background: `${C.peach}30`, border: `1.5px solid ${C.peach}`, color: C.peachDark, borderRadius: 10, padding: '7px 13px', fontSize: 11, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap', fontFamily: 'inherit', flexShrink: 0 }}>
+              {tieneFechaNac ? 'Editar' : 'Agregar'}
             </button>
           </div>
         )}
@@ -505,7 +609,6 @@ export default function TarjetaFidelizacion({ uid, onLogout }) {
           {/* ── GANAR ── */}
           {vista === 'ganar' && (
             <div>
-              {/* Acción destacada única (foco visual) */}
               <div style={{ background: `linear-gradient(135deg,${C.mint}25,#EDFFF8)`, borderRadius: 20, padding: '16px 18px', marginBottom: 16, border: `2px solid ${C.mint}80`, position: 'relative', overflow: 'hidden' }}>
                 <div style={{ position: 'absolute', top: 8, right: 12, fontSize: 9, fontWeight: 800, color: '#2D6E5A', background: C.mint, borderRadius: 99, padding: '3px 9px', letterSpacing: .5 }}>HAZ ESTO PRIMERO</div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -528,7 +631,6 @@ export default function TarjetaFidelizacion({ uid, onLogout }) {
                 </p>
               </div>
 
-              {/* Hero referidos */}
               <div style={{ background: `linear-gradient(135deg,${C.bgSoft},#FFF0FB)`, borderRadius: 20, padding: '15px 17px', marginBottom: 8, border: `1.5px solid ${C.rose}60`, boxShadow: '0 4px 16px rgba(242,168,184,.2)', position: 'relative', overflow: 'hidden' }}>
                 <div style={{ position: 'absolute', top: -20, right: -10, fontSize: 64, opacity: .06 }}>👭</div>
                 <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, marginBottom: 10 }}>
@@ -551,13 +653,12 @@ export default function TarjetaFidelizacion({ uid, onLogout }) {
                 </button>
               </div>
 
-              {/* Resto de acciones — ordenadas por valor para el negocio */}
               {[
-                { tipo: 'compra_fisica',  icon:'🛍️', pts:'+1–2', label:'Compra en tienda',      desc:`+1 pt normal · +2 pts sobre $${(REGLA_COMPRA.monto_minimo_doble/1000).toFixed(0)}k`, cta: null,         bg: C.peach    },
-                { tipo: 'resena_google',  icon:'⭐',  pts:'+1',   label:'Reseña en Google',       desc:'Comparte tu experiencia',                                              cta:'Ganar +1 pt', bg:'#FFD97D'  },
-                { tipo: 'historia_ig',    icon:'📸',  pts:'+½',   label:'Historia en Instagram',  desc:'Etiqueta @moonbowclub',                                                cta:'Ganar +½ pt', bg: C.lavender},
-                { tipo: 'resena_producto',icon:'💬',  pts:'+½',   label:'Reseña de producto',     desc:'Escribe en moonbow.cl',                                                cta: null,         bg: C.mint     },
-                { tipo: 'cumpleanos',     icon:'🎂',  pts:'+1',   label:'Tu cumpleaños',          desc:'Sorpresa el mes de tu cumple',                                         cta: null,         bg: C.peach    },
+                { tipo: 'compra_fisica',   icon: '🛍️', pts: '+1–2', label: 'Compra en tienda',      desc: `+1 pt normal · +2 pts sobre $${(REGLA_COMPRA.monto_minimo_doble/1000).toFixed(0)}k`, cta: null,          bg: C.peach    },
+                { tipo: 'resena_google',   icon: '⭐',  pts: '+1',   label: 'Reseña en Google',       desc: 'Comparte tu experiencia',                                                            cta: 'Ganar +1 pt', bg: '#FFD97D'  },
+                { tipo: 'historia_ig',     icon: '📸',  pts: '+½',   label: 'Historia en Instagram',  desc: 'Etiqueta @moonbowclub',                                                              cta: 'Ganar +½ pt', bg: C.lavender },
+                { tipo: 'resena_producto', icon: '💬',  pts: '+½',   label: 'Reseña de producto',     desc: 'Escribe en moonbow.cl',                                                              cta: null,          bg: C.mint     },
+                { tipo: 'cumpleanos',      icon: '🎂',  pts: '+1',   label: 'Tu cumpleaños',          desc: tieneFechaNac ? `Registrado: ${usuario.perfil.fecha_nacimiento}` : 'Agrégalo en tu tarjeta', cta: !tieneFechaNac ? 'Agregar' : null, bg: C.peach },
               ].map(a => (
                 <div key={a.tipo} className="accion-card" style={{ display: 'flex', alignItems: 'center', gap: 11, background: C.white, borderRadius: 16, padding: '12px 14px', marginBottom: 7, border: `1px solid ${C.border}`, boxShadow: '0 2px 6px rgba(45,27,46,.04)' }}>
                   <div style={{ width: 40, height: 40, borderRadius: 12, background: `${a.bg}25`, border: `1px solid ${a.bg}50`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, flexShrink: 0 }}>{a.icon}</div>
@@ -567,7 +668,9 @@ export default function TarjetaFidelizacion({ uid, onLogout }) {
                   </div>
                   <div style={{ fontSize: 13, fontWeight: 800, color: C.roseDark, flexShrink: 0 }}>{a.pts}<span style={{ fontSize: 9 }}> pt</span></div>
                   {a.cta && (
-                    <button onClick={() => setModalSolicitud(a.tipo)} className="btn-cta"
+                    <button
+                      onClick={() => a.tipo === 'cumpleanos' ? setModalCumple(true) : setModalSolicitud(a.tipo)}
+                      className="btn-cta"
                       style={{ background: `${C.rose}22`, border: `1.5px solid ${C.rose}`, color: C.roseDark, borderRadius: 10, padding: '6px 11px', fontSize: 11, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap', marginLeft: 4, flexShrink: 0, fontFamily: 'inherit' }}>
                       {a.cta}
                     </button>
@@ -623,7 +726,6 @@ export default function TarjetaFidelizacion({ uid, onLogout }) {
 
               {NIVELES.map(nivel => {
                 const desbloqueado = pts >= nivel.puntos;
-                const { progreso: progNivel } = calcularProgreso(Math.min(pts, nivel.puntos), [nivel]);
                 const t = TIER_COLORS[nivel.tier] || TIER_COLORS.bronze;
 
                 return (
@@ -674,6 +776,7 @@ export default function TarjetaFidelizacion({ uid, onLogout }) {
       {modalSolicitud && <ModalSolicitud tipo={modalSolicitud} enviando={enviando} onConfirmar={handleConfirmarSolicitud} onCerrar={() => setModalSolicitud(null)} />}
       {modalPremio    && <ModalPremio    nivel={modalPremio}    canjeando={canjeando} onConfirmar={handleConfirmarPremio}  onCerrar={() => setModalPremio(null)} />}
       {modalCodigo    && <ModalCodigo    codigo={modalCodigo.codigo} opcion={modalCodigo.opcion} onCerrar={() => { setModalCodigo(null); setVista('tarjeta'); }} />}
+      {modalCumple    && <ModalCumpleanos fechaActual={usuario.perfil?.fecha_nacimiento} onGuardar={handleGuardarCumpleanos} onCerrar={() => setModalCumple(false)} guardando={guardandoCumple} />}
     </div>
   );
 }
