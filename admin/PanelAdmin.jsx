@@ -1,10 +1,10 @@
 'use client';
-// admin/PanelAdmin.jsx — v4 con opciones de premio y código Shopify
+// admin/PanelAdmin.jsx — v5
 
 import { useState, useEffect } from 'react';
 import {
   getAccionesPendientes, aprobarAccion, rechazarAccion,
-  agregarPuntos, getTopClientes, getUsuario, ACCIONES
+  agregarPuntos, restarPuntos, getTopClientes, getUsuario, ACCIONES
 } from '../lib/puntos';
 import { collection, query, orderBy, limit, getDocs, doc, updateDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
@@ -26,6 +26,7 @@ const C = {
   greenBg:  '#EDFAF4',
   red:      '#E8857E',
   redBg:    '#FEF0EF',
+  lavender: '#C9B8E8',
 };
 
 const TIER_COLORS = {
@@ -34,6 +35,16 @@ const TIER_COLORS = {
   gold:   { from: '#F7D98B', to: '#D4A96A' },
 };
 
+function TierBadge({ tier }) {
+  const t = TIER_COLORS[tier] || TIER_COLORS.bronze;
+  const labels = { bronze: 'Bronce', silver: 'Plata', gold: 'Oro' };
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, background: `linear-gradient(135deg,${t.from},${t.to})`, borderRadius: 99, padding: '3px 10px', fontSize: 10, fontWeight: 700, color: '#fff' }}>
+      ✦ {labels[tier] || tier}
+    </span>
+  );
+}
+
 export default function PanelAdmin({ adminUid }) {
   const [vista, setVista]               = useState('pendientes');
   const [pendientes, setPendientes]     = useState([]);
@@ -41,11 +52,16 @@ export default function PanelAdmin({ adminUid }) {
   const [recompensas, setRecompensas]   = useState([]);
   const [cargando, setCargando]         = useState(true);
   const [mensaje, setMensaje]           = useState(null);
+
+  // Modal puntos
   const [modalPuntos, setModalPuntos]   = useState(false);
   const [uidManual, setUidManual]       = useState('');
   const [accionManual, setAccionManual] = useState('compra_fisica');
   const [montoManual, setMontoManual]   = useState('');
+  const [puntosCustom, setPuntosCustom] = useState('');  // para restar puntos
+  const [modoModal, setModoModal]       = useState('agregar'); // 'agregar' | 'restar'
   const [usuarioFound, setUsuarioFound] = useState(null);
+  const [buscando, setBuscando]         = useState(false);
 
   useEffect(() => { cargarDatos(); }, [vista]);
 
@@ -63,6 +79,24 @@ export default function PanelAdmin({ adminUid }) {
     setCargando(false);
   }
 
+  function abrirModalDesdeCliente(cliente, modo = 'agregar') {
+    setUidManual(cliente.id);
+    setUsuarioFound(cliente);
+    setModoModal(modo);
+    setPuntosCustom('');
+    setMontoManual('');
+    setModalPuntos(true);
+  }
+
+  function cerrarModal() {
+    setModalPuntos(false);
+    setUsuarioFound(null);
+    setUidManual('');
+    setPuntosCustom('');
+    setMontoManual('');
+    setModoModal('agregar');
+  }
+
   async function handleAprobar(id)  { await aprobarAccion(id, adminUid);  mostrarMensaje('🌸 Puntos aprobados'); cargarDatos(); }
   async function handleRechazar(id) { await rechazarAccion(id);           mostrarMensaje('Acción rechazada');   cargarDatos(); }
 
@@ -73,17 +107,48 @@ export default function PanelAdmin({ adminUid }) {
   }
 
   async function handleBuscarUsuario() {
-    setUsuarioFound(await getUsuario(uidManual));
+    if (!uidManual.trim()) return;
+    setBuscando(true);
+    setUsuarioFound(await getUsuario(uidManual.trim()));
+    setBuscando(false);
   }
 
+  // ── AGREGAR puntos (admin siempre omite límite) ──────────────────────────────
   async function handleAgregarPuntosManual() {
     if (!usuarioFound) return;
-    await agregarPuntos(uidManual, accionManual, { monto: montoManual ? parseInt(montoManual) : null, aprobado_por: adminUid });
-    mostrarMensaje(`✦ Puntos añadidos a ${usuarioFound.perfil?.nombre || 'cliente'}`);
-    setModalPuntos(false); setUidManual(''); setUsuarioFound(null); setMontoManual('');
+    try {
+      await agregarPuntos(uidManual, accionManual, {
+        monto:         montoManual ? parseInt(montoManual) : null,
+        aprobado_por:  adminUid,
+        omitir_limite: true,   // ← admin puede siempre agregar, sin importar límites
+      });
+      mostrarMensaje(`✦ Puntos añadidos a ${usuarioFound.perfil?.nombre || 'cliente'}`);
+      cerrarModal();
+      cargarDatos();
+    } catch (e) {
+      mostrarMensaje(`Error: ${e.message}`);
+    }
   }
 
-  function mostrarMensaje(texto) { setMensaje(texto); setTimeout(() => setMensaje(null), 3000); }
+  // ── RESTAR puntos ────────────────────────────────────────────────────────────
+  async function handleRestarPuntosManual() {
+    if (!usuarioFound || !puntosCustom) return;
+    const pts = parseFloat(puntosCustom);
+    if (isNaN(pts) || pts <= 0) { mostrarMensaje('Ingresa un número válido'); return; }
+    try {
+      await restarPuntos(uidManual, pts, 'ajuste_admin', {
+        descripcion:  `Ajuste manual por admin`,
+        aprobado_por: adminUid,
+      });
+      mostrarMensaje(`◇ ${pts} pts descontados de ${usuarioFound.perfil?.nombre || 'cliente'}`);
+      cerrarModal();
+      cargarDatos();
+    } catch (e) {
+      mostrarMensaje(`Error: ${e.message}`);
+    }
+  }
+
+  function mostrarMensaje(texto) { setMensaje(texto); setTimeout(() => setMensaje(null), 3500); }
 
   const iconoAccion = { historia_ig: '📸', resena_google: '⭐', resena_producto: '💬', referido: '👭', compra_fisica: '🛍️', compra_online: '🛒' };
 
@@ -115,17 +180,6 @@ export default function PanelAdmin({ adminUid }) {
     return null;
   }
 
-  // Badge de tier
-  function TierBadge({ tier }) {
-    const t = TIER_COLORS[tier] || TIER_COLORS.bronze;
-    const labels = { bronze: 'Bronce', silver: 'Plata', gold: 'Oro' };
-    return (
-      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, background: `linear-gradient(135deg,${t.from},${t.to})`, borderRadius: 99, padding: '3px 10px', fontSize: 10, fontWeight: 700, color: '#fff' }}>
-        ✦ {labels[tier] || tier}
-      </span>
-    );
-  }
-
   return (
     <div style={{ background: C.bg, minHeight: '100vh', maxWidth: 430, margin: '0 auto', fontFamily: "'DM Sans', -apple-system, sans-serif", color: C.text, paddingBottom: 24 }}>
       <style>{`
@@ -141,7 +195,7 @@ export default function PanelAdmin({ adminUid }) {
           <div style={{ fontSize: 18, fontWeight: 500, color: C.text, fontFamily: "'Playfair Display', serif", fontStyle: 'italic' }}>moonbow <span style={{ color: C.rose }}>✦</span></div>
           <div style={{ fontSize: 11, color: C.textSoft, marginTop: 2, letterSpacing: .5 }}>Panel de administración</div>
         </div>
-        <button onClick={() => setModalPuntos(true)}
+        <button onClick={() => { setModoModal('agregar'); setModalPuntos(true); }}
           style={{ background: `linear-gradient(135deg,${C.rose},${C.roseDark})`, color: '#fff', border: 'none', borderRadius: 12, padding: '10px 16px', fontSize: 13, fontWeight: 700, cursor: 'pointer', boxShadow: `0 4px 12px rgba(217,96,122,.3)`, fontFamily: 'inherit' }}>
           + Puntos
         </button>
@@ -149,7 +203,7 @@ export default function PanelAdmin({ adminUid }) {
 
       {/* Toast */}
       {mensaje && (
-        <div style={{ position: 'fixed', top: 24, left: '50%', background: C.white, border: `1px solid ${C.border}`, color: C.roseDark, padding: '12px 20px', borderRadius: 16, fontSize: 13, fontWeight: 600, zIndex: 999, whiteSpace: 'nowrap', boxShadow: '0 8px 24px rgba(45,27,46,.12)', animation: 'bounceIn .4s ease' }}>
+        <div style={{ position: 'fixed', top: 24, left: '50%', transform: 'translateX(-50%)', background: C.white, border: `1px solid ${C.border}`, color: C.roseDark, padding: '12px 20px', borderRadius: 16, fontSize: 13, fontWeight: 600, zIndex: 999, whiteSpace: 'nowrap', boxShadow: '0 8px 24px rgba(45,27,46,.12)', animation: 'bounceIn .4s ease' }}>
           {mensaje}
         </div>
       )}
@@ -157,9 +211,9 @@ export default function PanelAdmin({ adminUid }) {
       {/* Stats */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 10, padding: '14px 16px 0' }}>
         {[
-          { num: pendientes.length,                             label: 'Pendientes', color: C.rose     },
-          { num: topClientes.length,                            label: 'Clientes',   color: C.lavender || '#C9B8E8' },
-          { num: recompensas.filter(r => !r.entregado).length,  label: 'Por dar',    color: C.gold     },
+          { num: pendientes.length,                            label: 'Pendientes', color: C.rose     },
+          { num: topClientes.length,                           label: 'Clientes',   color: C.lavender },
+          { num: recompensas.filter(r => !r.entregado).length, label: 'Por dar',    color: C.gold     },
         ].map((s, i) => (
           <div key={i} style={{ background: C.white, borderRadius: 16, padding: '14px 12px', textAlign: 'center', border: `1px solid ${C.border}`, boxShadow: '0 2px 8px rgba(45,27,46,.04)' }}>
             <div style={{ fontSize: 28, fontWeight: 700, color: s.color, fontFamily: "'Playfair Display', serif" }}>{s.num}</div>
@@ -237,16 +291,27 @@ export default function PanelAdmin({ adminUid }) {
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
                     <TierBadge tier={cliente.lealtad?.tier || 'bronze'} />
                     <span style={{ fontSize: 10, color: C.textSoft }}>{(cliente.lealtad?.puntos_acumulados_total || 0).toFixed(0)} pts totales</span>
+                    {/* Mostrar cumpleaños si existe */}
+                    {cliente.perfil?.fecha_nacimiento && (
+                      <span style={{ fontSize: 10, color: C.textSoft }}>🎂 {cliente.perfil.fecha_nacimiento}</span>
+                    )}
                   </div>
                 </div>
                 <div style={{ textAlign: 'center', flexShrink: 0 }}>
-                  <div style={{ fontSize: 18, fontWeight: 700, color: C.roseDark }}>{(cliente.lealtad?.puntos || 0).toFixed(0)}</div>
+                  <div style={{ fontSize: 18, fontWeight: 700, color: C.roseDark }}>{(cliente.lealtad?.puntos || 0).toFixed(1)}</div>
                   <div style={{ fontSize: 9, color: C.textSoft }}>disponibles</div>
                 </div>
-                <button onClick={() => { setUidManual(cliente.id); setUsuarioFound(cliente); setModalPuntos(true); }}
-                  style={{ width: 32, height: 32, background: `${C.rose}20`, border: `1.5px solid ${C.rose}`, color: C.roseDark, borderRadius: 10, fontSize: 18, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'inherit' }}>
-                  +
-                </button>
+                {/* Botones + y - */}
+                <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+                  <button onClick={() => abrirModalDesdeCliente(cliente, 'agregar')}
+                    style={{ width: 32, height: 32, background: `${C.rose}20`, border: `1.5px solid ${C.rose}`, color: C.roseDark, borderRadius: 10, fontSize: 18, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'inherit' }}>
+                    +
+                  </button>
+                  <button onClick={() => abrirModalDesdeCliente(cliente, 'restar')}
+                    style={{ width: 32, height: 32, background: `${C.redBg}`, border: `1.5px solid ${C.red}80`, color: C.red, borderRadius: 10, fontSize: 18, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'inherit' }}>
+                    −
+                  </button>
+                </div>
               </div>
             ))}
           </div>
@@ -268,7 +333,6 @@ export default function PanelAdmin({ adminUid }) {
                       <TierBadge tier={r.tier || 'bronze'} />
                       <span style={{ fontSize: 13, fontWeight: 700, color: C.text }}>{r.opcion_label || r.premio}</span>
                     </div>
-                    {/* Código Shopify */}
                     {r.codigo_shopify && (
                       <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: `${C.peach}30`, border: `1px solid ${C.peach}`, borderRadius: 8, padding: '3px 10px', marginBottom: 4 }}>
                         <span style={{ fontSize: 11, fontWeight: 700, color: C.gold, letterSpacing: 1 }}>🏷️ {r.codigo_shopify}</span>
@@ -280,7 +344,6 @@ export default function PanelAdmin({ adminUid }) {
                     {r.entregado ? '✓ Entregado' : 'Pendiente'}
                   </div>
                 </div>
-                {/* Tipo de entrega */}
                 {!r.entregado && (
                   <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                     <div style={{ flex: 1, fontSize: 11, color: C.textSoft, fontStyle: 'italic' }}>
@@ -301,70 +364,105 @@ export default function PanelAdmin({ adminUid }) {
         )}
       </div>
 
-      {/* Modal añadir puntos */}
+      {/* ── MODAL PUNTOS ── */}
       {modalPuntos && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(45,27,46,.5)', backdropFilter: 'blur(8px)', display: 'flex', alignItems: 'flex-end', zIndex: 200 }}
-          onClick={() => { setModalPuntos(false); setUsuarioFound(null); setUidManual(''); }}>
+          onClick={cerrarModal}>
           <div style={{ background: C.white, borderRadius: '28px 28px 0 0', padding: '10px 24px 52px', width: '100%', maxWidth: 430, margin: '0 auto', boxShadow: '0 -8px 40px rgba(45,27,46,.15)' }}
             onClick={e => e.stopPropagation()}>
             <div style={{ width: 36, height: 4, background: C.border, borderRadius: 99, margin: '0 auto 22px' }} />
+
+            {/* Título + toggle agregar/restar */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-              <div style={{ fontSize: 18, fontWeight: 700, color: C.text, fontFamily: "'Playfair Display', serif", fontStyle: 'italic' }}>Añadir puntos</div>
-              <button onClick={() => { setModalPuntos(false); setUsuarioFound(null); setUidManual(''); }}
-                style={{ background: C.bgSoft, border: 'none', borderRadius: 12, width: 34, height: 34, cursor: 'pointer', color: C.textMid, fontSize: 15, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>✕</button>
+              <div style={{ fontSize: 18, fontWeight: 700, color: C.text, fontFamily: "'Playfair Display', serif", fontStyle: 'italic' }}>
+                {modoModal === 'agregar' ? 'Añadir puntos' : 'Restar puntos'}
+              </div>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <button onClick={() => setModoModal('agregar')}
+                  style={{ padding: '6px 12px', background: modoModal === 'agregar' ? C.greenBg : C.bgSoft, border: `1.5px solid ${modoModal === 'agregar' ? C.green : C.border}`, color: modoModal === 'agregar' ? '#3A9E78' : C.textSoft, borderRadius: 10, fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
+                  + Agregar
+                </button>
+                <button onClick={() => setModoModal('restar')}
+                  style={{ padding: '6px 12px', background: modoModal === 'restar' ? C.redBg : C.bgSoft, border: `1.5px solid ${modoModal === 'restar' ? C.red : C.border}`, color: modoModal === 'restar' ? C.red : C.textSoft, borderRadius: 10, fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
+                  − Restar
+                </button>
+              </div>
             </div>
+
+            {/* Buscar cliente si no viene desde la lista */}
             {!usuarioFound ? (
               <div>
                 <label style={aS.label}>UID del cliente</label>
                 <input style={aS.input} value={uidManual} onChange={e => setUidManual(e.target.value)} placeholder="UID en Firebase" />
-                <button onClick={handleBuscarUsuario} style={aS.btnSecundario}>Buscar cliente</button>
+                <button onClick={handleBuscarUsuario} disabled={buscando} style={aS.btnSecundario}>
+                  {buscando ? 'Buscando...' : 'Buscar cliente'}
+                </button>
               </div>
             ) : (
               <div>
+                {/* Info cliente */}
                 <div style={{ background: `linear-gradient(135deg,${C.bgSoft},#FFF0FB)`, borderRadius: 14, padding: 14, marginBottom: 18, border: `1.5px solid ${C.border}` }}>
                   <div style={{ fontSize: 16, fontWeight: 700, color: C.roseDark }}>{usuarioFound.perfil?.nombre || usuarioFound.perfil?.email}</div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6 }}>
                     <TierBadge tier={usuarioFound.lealtad?.tier || 'bronze'} />
-                    <span style={{ fontSize: 13, color: C.textSoft }}>{(usuarioFound.lealtad?.puntos || 0).toFixed(0)} pts actuales</span>
+                    <span style={{ fontSize: 13, color: C.textSoft }}>{(usuarioFound.lealtad?.puntos || 0).toFixed(1)} pts actuales</span>
                   </div>
                 </div>
-                <label style={aS.label}>Tipo de acción</label>
-                <select style={aS.select} value={accionManual} onChange={e => setAccionManual(e.target.value)}>
-                  {Object.entries(ACCIONES).map(([key, val]) => (
-                    <option key={key} value={key}>{val.label} (+{val.puntos} pts)</option>
-                  ))}
-                </select>
-                {accionManual === 'compra_fisica' && (
+
+                {/* ─── MODO AGREGAR ─── */}
+                {modoModal === 'agregar' && (
                   <>
-                    <label style={aS.label}>Monto compra (CLP)</label>
-                    <input style={aS.input} type="number" value={montoManual} onChange={e => setMontoManual(e.target.value)} placeholder="Ej: 15000" />
+                    <label style={aS.label}>Tipo de acción</label>
+                    <select style={aS.select} value={accionManual} onChange={e => setAccionManual(e.target.value)}>
+                      {Object.entries(ACCIONES).map(([key, val]) => (
+                        <option key={key} value={key}>{val.label} (+{val.puntos} pts)</option>
+                      ))}
+                    </select>
+                    {accionManual === 'compra_fisica' && (
+                      <>
+                        <label style={aS.label}>Monto compra (CLP)</label>
+                        <input style={aS.input} type="number" value={montoManual} onChange={e => setMontoManual(e.target.value)} placeholder="Ej: 15000" />
+                      </>
+                    )}
+                    <button onClick={handleAgregarPuntosManual} style={aS.btnPrimario}>
+                      Confirmar +{ACCIONES[accionManual]?.puntos} pts ✦
+                    </button>
                   </>
                 )}
-                <button onClick={handleAgregarPuntosManual} style={aS.btnPrimario}>
-                  Confirmar +{ACCIONES[accionManual]?.puntos} pts a {usuarioFound.perfil?.nombre?.split(' ')[0] || 'cliente'}
-                </button>
+
+                {/* ─── MODO RESTAR ─── */}
+                {modoModal === 'restar' && (
+                  <>
+                    <label style={aS.label}>Puntos a descontar</label>
+                    <input style={aS.input} type="number" step="0.5" min="0.5" value={puntosCustom} onChange={e => setPuntosCustom(e.target.value)} placeholder="Ej: 1 o 0.5" />
+                    <div style={{ background: C.redBg, borderRadius: 12, padding: '10px 14px', marginBottom: 14, border: `1px solid ${C.red}40`, fontSize: 12, color: C.red }}>
+                      ⚠️ Esta acción descuenta puntos y queda registrada en el historial.
+                    </div>
+                    <button onClick={handleRestarPuntosManual}
+                      style={{ ...aS.btnPrimario, background: `linear-gradient(135deg,${C.red},#C05050)`, boxShadow: '0 6px 20px rgba(232,133,126,.35)' }}>
+                      Confirmar −{puntosCustom || '?'} pts
+                    </button>
+                  </>
+                )}
               </div>
             )}
           </div>
         </div>
       )}
-
-      {/* Estilos inline para TierBadge (necesita acceso a C.lavender) */}
-      <style>{`.tier-badge-lavender{background:linear-gradient(135deg,#D8C8F0,#C9B8E8)}`}</style>
     </div>
   );
 }
 
 // Estilos compartidos
 const aS = {
-  label:        { display: 'block', fontSize: 12, color: '#6B4A5E', marginBottom: 6, fontWeight: 500 },
-  input:        { width: '100%', background: '#FEF3F0', border: '1.5px solid #EDD8E4', borderRadius: 12, padding: '12px 14px', color: '#2D1B2E', fontSize: 14, marginBottom: 14, boxSizing: 'border-box', outline: 'none', fontFamily: 'inherit' },
-  select:       { width: '100%', background: '#FEF3F0', border: '1.5px solid #EDD8E4', borderRadius: 12, padding: '12px 14px', color: '#2D1B2E', fontSize: 14, marginBottom: 14, cursor: 'pointer', fontFamily: 'inherit' },
-  btnPrimario:  { width: '100%', background: 'linear-gradient(135deg,#F2A8B8,#D9607A)', color: '#fff', border: 'none', borderRadius: 16, padding: 14, fontSize: 14, fontWeight: 700, cursor: 'pointer', boxShadow: '0 6px 20px rgba(217,96,122,.35)', fontFamily: 'inherit' },
-  btnSecundario:{ width: '100%', background: '#FEF3F0', border: '1.5px solid #EDD8E4', color: '#6B4A5E', borderRadius: 14, padding: 13, fontSize: 14, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' },
-  verBox:       { background: '#FEF3F0', borderRadius: 12, padding: '10px 12px', marginBottom: 12, border: '1px solid #EDD8E4' },
-  verLabel:     { fontSize: 10, color: '#A8849A', marginBottom: 5, textTransform: 'uppercase', letterSpacing: .5, fontWeight: 600 },
-  verLink:      { display: 'block', color: '#D9607A', fontSize: 13, textDecoration: 'underline', fontWeight: 500 },
-  verDato:      { fontSize: 12, color: '#6B4A5E', marginTop: 3 },
-  verVacio:     { fontSize: 12, color: '#A8849A', fontStyle: 'italic' },
+  label:         { display: 'block', fontSize: 12, color: '#6B4A5E', marginBottom: 6, fontWeight: 500 },
+  input:         { width: '100%', background: '#FEF3F0', border: '1.5px solid #EDD8E4', borderRadius: 12, padding: '12px 14px', color: '#2D1B2E', fontSize: 14, marginBottom: 14, boxSizing: 'border-box', outline: 'none', fontFamily: 'inherit' },
+  select:        { width: '100%', background: '#FEF3F0', border: '1.5px solid #EDD8E4', borderRadius: 12, padding: '12px 14px', color: '#2D1B2E', fontSize: 14, marginBottom: 14, cursor: 'pointer', fontFamily: 'inherit' },
+  btnPrimario:   { width: '100%', background: 'linear-gradient(135deg,#F2A8B8,#D9607A)', color: '#fff', border: 'none', borderRadius: 16, padding: 14, fontSize: 14, fontWeight: 700, cursor: 'pointer', boxShadow: '0 6px 20px rgba(217,96,122,.35)', fontFamily: 'inherit' },
+  btnSecundario: { width: '100%', background: '#FEF3F0', border: '1.5px solid #EDD8E4', color: '#6B4A5E', borderRadius: 14, padding: 13, fontSize: 14, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' },
+  verBox:        { background: '#FEF3F0', borderRadius: 12, padding: '10px 12px', marginBottom: 12, border: '1px solid #EDD8E4' },
+  verLabel:      { fontSize: 10, color: '#A8849A', marginBottom: 5, textTransform: 'uppercase', letterSpacing: .5, fontWeight: 600 },
+  verLink:       { display: 'block', color: '#D9607A', fontSize: 13, textDecoration: 'underline', fontWeight: 500 },
+  verDato:       { fontSize: 12, color: '#6B4A5E', marginTop: 3 },
+  verVacio:      { fontSize: 12, color: '#A8849A', fontStyle: 'italic' },
 };
