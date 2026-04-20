@@ -120,7 +120,7 @@ function ModalPremio({ nivel, onConfirmar, onCerrar, canjeando }) {
 
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(45,27,46,0.55)', backdropFilter: 'blur(12px)', display: 'flex', alignItems: 'flex-end', zIndex: 300 }} onClick={onCerrar}>
-      <div style={{ background: C.white, borderRadius: '28px 28px 0 0', padding: '10px 22px 52px', width: '100%', maxWidth: 430, margin: '0 auto', boxShadow: '0 -8px 40px rgba(45,27,46,0.14)' }} onClick={e => e.stopPropagation()}>
+      <div style={{ background: C.white, borderRadius: '28px 28px 0 0', padding: '10px 22px 52px', width: '100%', maxWidth: 430, width: '100%', margin: '0 auto', boxShadow: '0 -8px 40px rgba(45,27,46,0.14)' }} onClick={e => e.stopPropagation()}>
         <div style={{ width: 36, height: 4, background: C.border, borderRadius: 99, margin: '0 auto 20px' }} />
         <div style={{ textAlign: 'center', marginBottom: 20 }}>
           <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: `linear-gradient(135deg,${t.from},${t.to})`, borderRadius: 99, padding: '5px 16px', fontSize: 12, fontWeight: 700, color: '#fff', marginBottom: 10, boxShadow: '0 2px 8px rgba(0,0,0,0.12)' }}>
@@ -221,7 +221,7 @@ function ModalSolicitud({ tipo, onConfirmar, onCerrar, enviando }) {
 
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(45,27,46,0.5)', backdropFilter: 'blur(10px)', display: 'flex', alignItems: 'flex-end', zIndex: 300 }} onClick={onCerrar}>
-      <div style={{ background: C.white, borderRadius: '28px 28px 0 0', padding: '10px 24px 52px', width: '100%', maxWidth: 430, margin: '0 auto', boxShadow: '0 -8px 40px rgba(45,27,46,0.12)' }} onClick={e => e.stopPropagation()}>
+      <div style={{ background: C.white, borderRadius: '28px 28px 0 0', padding: '10px 24px 52px', width: '100%', maxWidth: 430, width: '100%', margin: '0 auto', boxShadow: '0 -8px 40px rgba(45,27,46,0.12)' }} onClick={e => e.stopPropagation()}>
         <div style={{ width: 36, height: 4, background: C.border, borderRadius: 99, margin: '0 auto 22px' }} />
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 18 }}>
           <div>
@@ -367,7 +367,7 @@ export default function TarjetaFidelizacion({ uid, onLogout }) {
   const tier             = TIER_COLORS[nivelActual?.tier] || null;
 
   return (
-    <div style={{ background: C.bg, minHeight: '100vh', maxWidth: 430, margin: '0 auto', fontFamily: "'DM Sans', -apple-system, sans-serif", color: C.text, paddingBottom: 104, position: 'relative' }}>
+    <div style={{ background: C.bg, minHeight: '100vh', maxWidth: 430, width: '100%', margin: '0 auto', fontFamily: "'DM Sans', -apple-system, sans-serif", color: C.text, paddingBottom: 104, position: 'relative' }}>
       <KBeautyBg />
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700;800&family=Playfair+Display:ital,wght@0,500;1,500&display=swap');
