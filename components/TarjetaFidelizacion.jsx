@@ -207,6 +207,7 @@ function ModalSolicitud({ tipo, onConfirmar, onCerrar, enviando }) {
   const cfgMap = {
     resena_google: { emoji: '⭐', titulo: 'Reseña en Google',      pts: '+1 pt',  color: '#FFD97D'  },
     historia_ig:   { emoji: '📸', titulo: 'Historia en Instagram', pts: '+½ pt', color: C.lavender },
+    newsletter:    { emoji: '💌', titulo: 'Suscripción newsletter', pts: '+½ pt', color: C.rose     },
   };
   const cfg = cfgMap[tipo];
   if (!cfg) return null;
@@ -215,6 +216,7 @@ function ModalSolicitud({ tipo, onConfirmar, onCerrar, enviando }) {
   function handleSubmit() {
     if (tipo === 'resena_google' && !linkResena.trim()) return;
     if (tipo === 'historia_ig'  && !imagenFile)         return;
+    if (tipo === 'newsletter'   && !linkResena.trim()) return;
     onConfirmar({ linkResena, handleIg, imagenFile });
   }
 
@@ -251,6 +253,19 @@ function ModalSolicitud({ tipo, onConfirmar, onCerrar, enviando }) {
               ? <div style={{ marginBottom: 14 }}><img src={preview} alt="Preview" style={{ width: '100%', borderRadius: 14, marginBottom: 8, border: `1px solid ${C.border}` }} /><button onClick={() => fileRef.current.click()} style={{ background: 'none', border: 'none', color: C.textSoft, fontSize: 12, cursor: 'pointer', padding: 0, fontFamily: 'inherit' }}>Cambiar imagen</button></div>
               : <button onClick={() => fileRef.current.click()} style={{ width: '100%', background: C.bgSoft, border: `2px dashed ${C.border}`, borderRadius: 14, padding: '20px', color: C.textSoft, fontSize: 13, cursor: 'pointer', marginBottom: 14, fontFamily: 'inherit' }}>📷 Seleccionar imagen</button>
             }
+          </>
+        )}
+        {tipo === 'newsletter' && (
+          <>
+            <p style={{ fontSize: 13, color: C.textMid, marginBottom: 16, lineHeight: 1.6 }}>
+              Suscríbete a nuestro newsletter en <strong style={{ color: C.roseDark }}>moonbow.cl</strong> y confirma tu email aquí para ganar tus puntos 🌸
+            </p>
+            <a href="https://moonbow.cl/#newsletter" target="_blank" rel="noopener noreferrer"
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, background: C.bgSoft, border: `1.5px solid ${C.border}`, color: C.roseDark, borderRadius: 14, padding: '12px 16px', fontSize: 13, fontWeight: 600, textDecoration: 'none', marginBottom: 16 }}>
+              Ir a suscribirme →
+            </a>
+            <label style={mS.label}>Tu email de suscripción *</label>
+            <input style={mS.input} value={linkResena} onChange={e => setLinkResena(e.target.value)} placeholder="hola@email.com" type="email" />
           </>
         )}
         <button onClick={handleSubmit} disabled={enviando}
@@ -658,7 +673,8 @@ export default function TarjetaFidelizacion({ uid, onLogout }) {
                 { tipo: 'resena_google',   icon: '⭐',  pts: '+1',   label: 'Reseña en Google',       desc: 'Comparte tu experiencia',                                                            cta: 'Ganar +1 pt', bg: '#FFD97D'  },
                 { tipo: 'historia_ig',     icon: '📸',  pts: '+½',   label: 'Historia en Instagram',  desc: 'Etiqueta @moonbowclub',                                                              cta: 'Ganar +½ pt', bg: C.lavender },
                 { tipo: 'resena_producto', icon: '💬',  pts: '+½',   label: 'Reseña de producto',     desc: 'Escribe en moonbow.cl',                                                              cta: null,          bg: C.mint     },
-                { tipo: 'cumpleanos',      icon: '🎂',  pts: '+1',   label: 'Tu cumpleaños',          desc: tieneFechaNac ? `Registrado: ${usuario.perfil.fecha_nacimiento}` : 'Agrégalo en tu tarjeta', cta: !tieneFechaNac ? 'Agregar' : null, bg: C.peach },
+                { tipo: 'newsletter',      icon: '💌',  pts: '+½',   label: 'Newsletter Moonbow',     desc: 'Suscríbete y confirma tu email',                                                             cta: 'Ganar +½ pt', bg: C.rose     },
+                { tipo: 'cumpleanos',      icon: '🎂',  pts: '+1',   label: 'Tu cumpleaños',          desc: tieneFechaNac ? `Registrado: ${usuario.perfil.fecha_nacimiento}` : 'Agrégalo en tu tarjeta', cta: tieneFechaNac ? 'Editar' : 'Agregar', bg: C.peach },
               ].map(a => (
                 <div key={a.tipo} className="accion-card" style={{ display: 'flex', alignItems: 'center', gap: 11, background: C.white, borderRadius: 16, padding: '12px 14px', marginBottom: 7, border: `1px solid ${C.border}`, boxShadow: '0 2px 6px rgba(45,27,46,.04)' }}>
                   <div style={{ width: 40, height: 40, borderRadius: 12, background: `${a.bg}25`, border: `1px solid ${a.bg}50`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, flexShrink: 0 }}>{a.icon}</div>
