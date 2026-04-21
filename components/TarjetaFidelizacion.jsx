@@ -407,7 +407,7 @@ export default function TarjetaFidelizacion({ uid, onLogout }) {
     setEnviando(true);
     try {
       let imagenUrl = null;
-      if (imagenFile) imagenUrl = await subirImagen(imagenFile, uid);
+      if (imagenFile) imagenUrl = await subirImagen(imagenFile);
       const extras = {};
       if (modalSolicitud === 'resena_google' && linkResena) extras.link_resena   = linkResena.trim();
       if (modalSolicitud === 'historia_ig'   && handleIg)   extras.handle_ig     = handleIg.trim();
@@ -439,12 +439,24 @@ export default function TarjetaFidelizacion({ uid, onLogout }) {
     }
   }
 
-  async function subirImagen(file, uid) {
-    const { getStorage, ref, uploadBytes, getDownloadURL } = await import('firebase/storage');
-    const storage = getStorage();
-    const storageRef = ref(storage, `evidencias/${uid}/${Date.now()}_${file.name}`);
-    const snap = await uploadBytes(storageRef, file);
-    return getDownloadURL(snap.ref);
+  async function subirImagen(file) {
+    return new Promise((resolve, reject) => {
+      // Comprimir si es muy grande (max ~800px)
+      const img = new Image();
+      const url = URL.createObjectURL(file);
+      img.onload = () => {
+        const MAX = 800;
+        const scale = Math.min(1, MAX / Math.max(img.width, img.height));
+        const canvas = document.createElement('canvas');
+        canvas.width  = img.width  * scale;
+        canvas.height = img.height * scale;
+        canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+        URL.revokeObjectURL(url);
+        resolve(canvas.toDataURL('image/jpeg', 0.7));
+      };
+      img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Error al leer la imagen')); };
+      img.src = url;
+    });
   }
 
   function mostrarMensaje(texto) { setMensaje(texto); setTimeout(() => setMensaje(null), 4000); }
