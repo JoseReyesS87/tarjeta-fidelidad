@@ -234,7 +234,7 @@ function ModalSolicitud({ tipo, onConfirmar, onCerrar, enviando }) {
         {tipo === 'resena_google' && (
           <>
             <p style={{ fontSize: 13, color: C.textMid, marginBottom: 16, lineHeight: 1.6 }}>Deja tu reseña en Google y pega el link aquí para validar tus puntos 🌸</p>
-            <a href="https://g.page/r/moonbow-club/review" target="_blank" rel="noopener noreferrer"
+            <a href="https://www.google.com/search?q=moonbow&rlz=1C1CHZN_enCL1098CL1098&oq=moonbow&gs_lcrp=EgZjaHJvbWUqDQgAEAAY4wIYgAQYnwQyDQgAEAAY4wIYgAQYnwQyBggBEEUYPDIGCAIQRRg8MhIIAxAuGCcYrwEYxwEYgAQYigUyBggEEEUYPDIGCAUQRRhBMgYIBhBFGDwyBggHEEUYPNIBCDI4NjFqMGo3qAIAsAIA&sourceid=chrome&ie=UTF-8" target="_blank" rel="noopener noreferrer"
               style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, background: C.bgSoft, border: `1.5px solid ${C.border}`, color: C.roseDark, borderRadius: 14, padding: '12px 16px', fontSize: 13, fontWeight: 600, textDecoration: 'none', marginBottom: 16 }}>
               Ir a Google Maps →
             </a>
@@ -244,7 +244,11 @@ function ModalSolicitud({ tipo, onConfirmar, onCerrar, enviando }) {
         )}
         {tipo === 'historia_ig' && (
           <>
-            <p style={{ fontSize: 13, color: C.textMid, marginBottom: 16, lineHeight: 1.6 }}>Sube un screenshot etiquetando a <strong style={{ color: C.roseDark }}>@moonbowclub</strong> ✨</p>
+            <p style={{ fontSize: 13, color: C.textMid, marginBottom: 16, lineHeight: 1.6 }}>Sube un screenshot etiquetando a <strong style={{ color: C.roseDark }}>@skincare_moonbow</strong> en tu historia ✨</p>
+            <a href="https://www.instagram.com/skincare_moonbow/" target="_blank" rel="noopener noreferrer"
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, background: C.bgSoft, border: `1.5px solid ${C.border}`, color: C.roseDark, borderRadius: 14, padding: '12px 16px', fontSize: 13, fontWeight: 600, textDecoration: 'none', marginBottom: 16 }}>
+              Ir a @skincare_moonbow →
+            </a>
             <label style={mS.label}>Tu @ de Instagram (opcional)</label>
             <input style={mS.input} value={handleIg} onChange={e => setHandleIg(e.target.value)} placeholder="@tuusuario" />
             <label style={mS.label}>Screenshot de tu historia *</label>
@@ -260,7 +264,7 @@ function ModalSolicitud({ tipo, onConfirmar, onCerrar, enviando }) {
             <p style={{ fontSize: 13, color: C.textMid, marginBottom: 16, lineHeight: 1.6 }}>
               Suscríbete a nuestro newsletter en <strong style={{ color: C.roseDark }}>moonbow.cl</strong> y confirma tu email aquí para ganar tus puntos 🌸
             </p>
-            <a href="https://moonbow.cl/#newsletter" target="_blank" rel="noopener noreferrer"
+            <a href="https://moonbow.cl" target="_blank" rel="noopener noreferrer"
               style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, background: C.bgSoft, border: `1.5px solid ${C.border}`, color: C.roseDark, borderRadius: 14, padding: '12px 16px', fontSize: 13, fontWeight: 600, textDecoration: 'none', marginBottom: 16 }}>
               Ir a suscribirme →
             </a>
@@ -671,8 +675,8 @@ export default function TarjetaFidelizacion({ uid, onLogout }) {
               {[
                 { tipo: 'compra_fisica',   icon: '🛍️', pts: '+1–2', label: 'Compra en tienda',      desc: `+1 pt normal · +2 pts sobre $${(REGLA_COMPRA.monto_minimo_doble/1000).toFixed(0)}k`, cta: null,          bg: C.peach    },
                 { tipo: 'resena_google',   icon: '⭐',  pts: '+1',   label: 'Reseña en Google',       desc: 'Comparte tu experiencia',                                                            cta: 'Ganar +1 pt', bg: '#FFD97D'  },
-                { tipo: 'historia_ig',     icon: '📸',  pts: '+½',   label: 'Historia en Instagram',  desc: 'Etiqueta @moonbowclub',                                                              cta: 'Ganar +½ pt', bg: C.lavender },
-                { tipo: 'resena_producto', icon: '💬',  pts: '+½',   label: 'Reseña de producto',     desc: 'Escribe en moonbow.cl',                                                              cta: null,          bg: C.mint     },
+                { tipo: 'historia_ig',     icon: '📸',  pts: '+½',   label: 'Historia en Instagram',  desc: 'Etiqueta @skincare_moonbow',                                                              cta: 'Ganar +½ pt', bg: C.lavender },
+                { tipo: 'resena_producto', icon: '💬',  pts: '+½',   label: 'Reseña de producto',     desc: 'Escribe en moonbow.cl',                                                              cta: 'Ir a reseñar', bg: C.mint     },
                 { tipo: 'newsletter',      icon: '💌',  pts: '+½',   label: 'Newsletter Moonbow',     desc: 'Suscríbete y confirma tu email',                                                             cta: 'Ganar +½ pt', bg: C.rose     },
                 { tipo: 'cumpleanos',      icon: '🎂',  pts: '+1',   label: 'Tu cumpleaños',          desc: tieneFechaNac ? `Registrado: ${usuario.perfil.fecha_nacimiento}` : 'Agrégalo en tu tarjeta', cta: tieneFechaNac ? 'Editar' : 'Agregar', bg: C.peach },
               ].map(a => (
@@ -685,7 +689,7 @@ export default function TarjetaFidelizacion({ uid, onLogout }) {
                   <div style={{ fontSize: 13, fontWeight: 800, color: C.roseDark, flexShrink: 0 }}>{a.pts}<span style={{ fontSize: 9 }}> pt</span></div>
                   {a.cta && (
                     <button
-                      onClick={() => a.tipo === 'cumpleanos' ? setModalCumple(true) : setModalSolicitud(a.tipo)}
+                      onClick={() => a.tipo === 'cumpleanos' ? setModalCumple(true) : a.tipo === 'resena_producto' ? window.open('https://moonbow.cl/collections/all', '_blank') : setModalSolicitud(a.tipo)}
                       className="btn-cta"
                       style={{ background: `${C.rose}22`, border: `1.5px solid ${C.rose}`, color: C.roseDark, borderRadius: 10, padding: '6px 11px', fontSize: 11, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap', marginLeft: 4, flexShrink: 0, fontFamily: 'inherit' }}>
                       {a.cta}
