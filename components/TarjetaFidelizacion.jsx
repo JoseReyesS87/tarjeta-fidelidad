@@ -261,21 +261,34 @@ function ModalSolicitud({ tipo, onConfirmar, onCerrar, enviando }) {
         )}
         {tipo === 'newsletter' && (
           <>
-            <p style={{ fontSize: 13, color: C.textMid, marginBottom: 16, lineHeight: 1.6 }}>
-              Suscríbete a nuestro newsletter en <strong style={{ color: C.roseDark }}>moonbow.cl</strong> y confirma tu email aquí para ganar tus puntos 🌸
+            <p style={{ fontSize: 13, color: C.textMid, marginBottom: 10, lineHeight: 1.6 }}>
+              Ingresa el email con que te suscribiste al newsletter de <strong style={{ color: C.roseDark }}>moonbow.cl</strong>. Lo validaremos en 24 hrs 🌸
             </p>
             <a href="https://moonbow.cl" target="_blank" rel="noopener noreferrer"
               style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, background: C.bgSoft, border: `1.5px solid ${C.border}`, color: C.roseDark, borderRadius: 14, padding: '12px 16px', fontSize: 13, fontWeight: 600, textDecoration: 'none', marginBottom: 16 }}>
-              Ir a suscribirme →
+              Suscribirme en moonbow.cl →
             </a>
             <label style={mS.label}>Tu email de suscripción *</label>
             <input style={mS.input} value={linkResena} onChange={e => setLinkResena(e.target.value)} placeholder="hola@email.com" type="email" />
           </>
         )}
-        <button onClick={handleSubmit} disabled={enviando}
-          style={{ width: '100%', background: `linear-gradient(135deg,${C.rose},${C.roseDark})`, color: '#fff', border: 'none', borderRadius: 16, padding: 15, fontSize: 15, fontWeight: 700, cursor: enviando ? 'not-allowed' : 'pointer', boxShadow: `0 6px 20px rgba(217,96,122,0.3)`, opacity: enviando ? 0.7 : 1, fontFamily: 'inherit' }}>
-          {enviando ? 'Enviando...' : `Ganar ${cfg.pts} ahora ✦`}
-        </button>
+        {tipo === 'newsletter' ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <button onClick={handleSubmit} disabled={enviando}
+              style={{ width: '100%', background: `linear-gradient(135deg,${C.rose},${C.roseDark})`, color: '#fff', border: 'none', borderRadius: 16, padding: 15, fontSize: 15, fontWeight: 700, cursor: enviando ? 'not-allowed' : 'pointer', boxShadow: `0 6px 20px rgba(217,96,122,0.3)`, opacity: enviando ? 0.7 : 1, fontFamily: 'inherit' }}>
+              {enviando ? 'Enviando...' : 'Me acabo de suscribir ✦'}
+            </button>
+            <button onClick={handleSubmit} disabled={enviando}
+              style={{ width: '100%', background: C.bgSoft, border: `1.5px solid ${C.border}`, color: C.roseDark, borderRadius: 16, padding: 15, fontSize: 15, fontWeight: 700, cursor: enviando ? 'not-allowed' : 'pointer', fontFamily: 'inherit' }}>
+              {enviando ? 'Enviando...' : 'Ya estaba suscrita ✦'}
+            </button>
+          </div>
+        ) : (
+          <button onClick={handleSubmit} disabled={enviando}
+            style={{ width: '100%', background: `linear-gradient(135deg,${C.rose},${C.roseDark})`, color: '#fff', border: 'none', borderRadius: 16, padding: 15, fontSize: 15, fontWeight: 700, cursor: enviando ? 'not-allowed' : 'pointer', boxShadow: `0 6px 20px rgba(217,96,122,0.3)`, opacity: enviando ? 0.7 : 1, fontFamily: 'inherit' }}>
+            {enviando ? 'Enviando...' : `Ganar ${cfg.pts} ahora ✦`}
+          </button>
+        )}
       </div>
     </div>
   );
@@ -396,9 +409,10 @@ export default function TarjetaFidelizacion({ uid, onLogout }) {
       let imagenUrl = null;
       if (imagenFile) imagenUrl = await subirImagen(imagenFile, uid);
       const extras = {};
-      if (modalSolicitud === 'resena_google' && linkResena) extras.link_resena = linkResena.trim();
-      if (modalSolicitud === 'historia_ig'   && handleIg)   extras.handle_ig   = handleIg.trim();
-      const desc = { resena_google: 'Reseña en Google', historia_ig: 'Historia en Instagram' };
+      if (modalSolicitud === 'resena_google' && linkResena) extras.link_resena   = linkResena.trim();
+      if (modalSolicitud === 'historia_ig'   && handleIg)   extras.handle_ig     = handleIg.trim();
+      if (modalSolicitud === 'newsletter'    && linkResena) extras.email_suscrito = linkResena.trim();
+      const desc = { resena_google: 'Reseña en Google', historia_ig: 'Historia en Instagram', newsletter: 'Suscripción newsletter' };
       await crearAccionPendiente(uid, usuario?.perfil?.nombre || '', modalSolicitud, desc[modalSolicitud], imagenUrl, extras);
       setModalSolicitud(null);
       mostrarMensaje('🌸 ¡Listo! Revisaremos tu solicitud en 24 hrs');
