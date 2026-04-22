@@ -1,0 +1,22 @@
+// lib/colores.js — paleta compartida entre TarjetaFidelizacion y TabRutina
+export const C = {
+  bg:        '#FDF8F5',
+  white:     '#FFFFFF',
+  bgSoft:    '#FEF3F0',
+  rose:      '#F2A8B8',
+  roseDark:  '#D9607A',
+  peach:     '#F7C5A8',
+  peachDark: '#E8935A',
+  lavender:  '#C9B8E8',
+  mint:      '#A8D8C8',
+  gold:      '#D4A96A',
+  silver:    '#A8A9AD',
+  text:      '#2D1B2E',
+  textMid:   '#6B4A5E',
+  textSoft:  '#A8849A',
+  border:    '#EDD8E4',
+  green:     '#5BB896',
+  greenBg:   '#EDFAF4',
+  red:       '#E8857E',
+  urgent:    '#FF6B6B',
+};

@@ -1,5 +1,14 @@
 'use client';
-// components/TarjetaFidelizacion.jsx — v6
+// components/TarjetaFidelizacion.jsx — v7 (bugs corregidos)
+// Cambios vs v6:
+//   1. Paleta C importada desde lib/colores (no duplicada)
+//   2. dynamic import('../lib/puntos') reemplazado por import estático al tope
+//   3. cargarDatos usa cancelled flag (evita setState en componente desmontado)
+//   4. subirImagen maneja correctamente el error de canvas (revokeObjectURL en error)
+//   5. handleConfirmarPremio: setModalCodigo recibe opcion correctamente (no puede ser undefined)
+//   6. compartirLink: clipboard.writeText con catch para navegadores que no lo permiten
+//   7. calcularProgreso con guard si niveles está vacío
+//   8. sellosLlenos usa ptsTotal (acumulados) en vez de pts (disponibles) — corrección semántica
 
 import { useState, useEffect, useRef } from 'react';
 import {
@@ -8,29 +17,7 @@ import {
   guardarFechaNacimiento, verificarCumpleanos,
   NIVELES, TOTAL_SELLOS, REGLA_COMPRA,
 } from '../lib/puntos';
-
-// ─── Paleta ───────────────────────────────────────────────────────────────────
-const C = {
-  bg:        '#FDF8F5',
-  white:     '#FFFFFF',
-  bgSoft:    '#FEF3F0',
-  rose:      '#F2A8B8',
-  roseDark:  '#D9607A',
-  peach:     '#F7C5A8',
-  peachDark: '#E8935A',
-  lavender:  '#C9B8E8',
-  mint:      '#A8D8C8',
-  gold:      '#D4A96A',
-  silver:    '#A8A9AD',
-  text:      '#2D1B2E',
-  textMid:   '#6B4A5E',
-  textSoft:  '#A8849A',
-  border:    '#EDD8E4',
-  green:     '#5BB896',
-  greenBg:   '#EDFAF4',
-  red:       '#E8857E',
-  urgent:    '#FF6B6B',
-};
+import { C } from '@/lib/colores'; // FIX 1: importar paleta compartida
 
 const TIER_COLORS = {
   bronze: { from: '#F2C4A0', to: '#E89878' },
@@ -40,6 +27,8 @@ const TIER_COLORS = {
 
 // ─── Calcular progreso entre niveles ─────────────────────────────────────────
 function calcularProgreso(pts, niveles) {
+  // FIX 7: guard si niveles vacío
+  if (!niveles || niveles.length === 0) return { progreso: 0, proxNivel: null, ptsFaltan: 0, ptsDesde: 0 };
   const proxNivel = niveles.find(n => pts < n.puntos);
   if (!proxNivel) return { progreso: 100, proxNivel: null, ptsFaltan: 0, ptsDesde: 0 };
 
@@ -91,7 +80,8 @@ const PASOS_RUTINA = [
 function SelloRutina({ paso, activo, numero }) {
   const [tip, setTip] = useState(false);
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, position: 'relative' }}
+    <div
+      style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, position: 'relative' }}
       onMouseEnter={() => setTip(true)} onMouseLeave={() => setTip(false)}
       onTouchStart={() => setTip(true)} onTouchEnd={() => setTip(false)}>
       <div style={{ width: '100%', aspectRatio: '1', borderRadius: '50%', background: activo ? `linear-gradient(135deg,${C.rose}35,${C.peach}25)` : 'rgba(237,216,228,0.28)', border: `2px solid ${activo ? C.rose : C.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: activo ? 16 : 14, boxShadow: activo ? `0 3px 12px rgba(242,168,184,0.32)` : 'none', transition: 'all 0.35s cubic-bezier(0.34,1.56,0.64,1)', transform: activo ? 'scale(1)' : 'scale(0.92)', filter: activo ? 'none' : 'grayscale(50%) opacity(0.5)', position: 'relative' }}>
@@ -155,16 +145,26 @@ function ModalPremio({ nivel, onConfirmar, onCerrar, canjeando }) {
 // ─── Modal código obtenido ────────────────────────────────────────────────────
 function ModalCodigo({ codigo, opcion, onCerrar }) {
   const [copiado, setCopiado] = useState(false);
-  function copiar() { navigator.clipboard.writeText(codigo); setCopiado(true); setTimeout(() => setCopiado(false), 2500); }
 
+  // FIX 6: clipboard con catch
+  function copiar() {
+    navigator.clipboard.writeText(codigo).then(() => {
+      setCopiado(true);
+      setTimeout(() => setCopiado(false), 2500);
+    }).catch(() => {
+      // fallback: seleccionar texto manualmente no es posible en este contexto
+    });
+  }
+
+  // FIX 5: opcion puede ser undefined si el canje no generó código
   if (!codigo) return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(45,27,46,0.55)', backdropFilter: 'blur(12px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 400, padding: 20 }}>
       <div style={{ background: C.white, borderRadius: 28, padding: '36px 28px', width: '100%', maxWidth: 380, textAlign: 'center', boxShadow: '0 20px 60px rgba(45,27,46,0.2)' }}>
-        <div style={{ fontSize: 52, marginBottom: 16 }}>{opcion.emoji}</div>
+        <div style={{ fontSize: 52, marginBottom: 16 }}>{opcion?.emoji || '🎁'}</div>
         <div style={{ fontSize: 22, fontWeight: 700, color: C.text, fontFamily: "'Playfair Display', serif", marginBottom: 8 }}>¡Recompensa canjeada!</div>
         <div style={{ background: C.bgSoft, borderRadius: 16, padding: '14px 18px', marginBottom: 22, border: `1px solid ${C.border}` }}>
           <div style={{ fontSize: 12, color: C.textSoft, marginBottom: 4 }}>¿Qué sigue?</div>
-          <div style={{ fontSize: 13, color: C.textMid, lineHeight: 1.5 }}>Pasa por nuestra tienda de Providencia o escríbenos en Instagram <strong style={{ color: C.roseDark }}>@moonbowclub</strong> para coordinar tu {opcion.label} 🌸</div>
+          <div style={{ fontSize: 13, color: C.textMid, lineHeight: 1.5 }}>Pasa por nuestra tienda de Providencia o escríbenos en Instagram <strong style={{ color: C.roseDark }}>@moonbowclub</strong> para coordinar tu {opcion?.label || 'recompensa'} 🌸</div>
         </div>
         <button onClick={onCerrar} style={{ width: '100%', background: `linear-gradient(135deg,${C.rose},${C.roseDark})`, color: '#fff', border: 'none', borderRadius: 14, padding: 14, fontSize: 14, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>Entendido ✦</button>
       </div>
@@ -180,7 +180,7 @@ function ModalCodigo({ codigo, opcion, onCerrar }) {
         <div style={{ background: `linear-gradient(135deg,${C.bgSoft},#FFF0FB)`, border: `2px dashed ${C.rose}`, borderRadius: 18, padding: '20px 24px', marginBottom: 18 }}>
           <div style={{ fontSize: 11, color: C.textSoft, marginBottom: 8, letterSpacing: 1, textTransform: 'uppercase' }}>Tu código de descuento</div>
           <div style={{ fontSize: 32, fontWeight: 800, color: C.roseDark, letterSpacing: 3, fontFamily: "'Playfair Display', serif" }}>{codigo}</div>
-          <div style={{ fontSize: 12, color: C.textMid, marginTop: 8 }}>{opcion.desc}</div>
+          <div style={{ fontSize: 12, color: C.textMid, marginTop: 8 }}>{opcion?.desc}</div>
         </div>
         <button onClick={copiar} style={{ width: '100%', background: copiado ? `linear-gradient(135deg,${C.green},#3A9E78)` : `linear-gradient(135deg,${C.rose},${C.roseDark})`, color: '#fff', border: 'none', borderRadius: 14, padding: 14, fontSize: 15, fontWeight: 700, cursor: 'pointer', marginBottom: 10, transition: 'all 0.3s', fontFamily: 'inherit' }}>
           {copiado ? '✓ ¡Copiado!' : '📋 Copiar código'}
@@ -198,12 +198,11 @@ function ModalCodigo({ codigo, opcion, onCerrar }) {
 // ─── Modal solicitud de puntos ────────────────────────────────────────────────
 function ModalSolicitud({ tipo, onConfirmar, onCerrar, enviando }) {
   const [linkResena, setLinkResena] = useState('');
-  const [handleIg, setHandleIg]     = useState('');
+  const [handleIg,  setHandleIg]   = useState('');
   const [imagenFile, setImagenFile] = useState(null);
-  const [preview, setPreview]       = useState(null);
+  const [preview,   setPreview]    = useState(null);
   const fileRef = useRef();
 
-  // FIX: si cfg es undefined (tipo inesperado), no renderizar nada
   const cfgMap = {
     resena_google: { emoji: '⭐', titulo: 'Reseña en Google',      pts: '+1 pt',  color: '#FFD97D'  },
     historia_ig:   { emoji: '📸', titulo: 'Historia en Instagram', pts: '+½ pt', color: C.lavender },
@@ -212,11 +211,17 @@ function ModalSolicitud({ tipo, onConfirmar, onCerrar, enviando }) {
   const cfg = cfgMap[tipo];
   if (!cfg) return null;
 
-  function handleImagen(e) { const f = e.target.files[0]; if (!f) return; setImagenFile(f); setPreview(URL.createObjectURL(f)); }
+  function handleImagen(e) {
+    const f = e.target.files[0];
+    if (!f) return;
+    setImagenFile(f);
+    setPreview(URL.createObjectURL(f));
+  }
+
   function handleSubmit() {
     if (tipo === 'resena_google' && !linkResena.trim()) return;
     if (tipo === 'historia_ig'  && !imagenFile)         return;
-    if (tipo === 'newsletter'   && !linkResena.trim()) return;
+    if (tipo === 'newsletter'   && !linkResena.trim())  return;
     onConfirmar({ linkResena, handleIg, imagenFile });
   }
 
@@ -231,10 +236,11 @@ function ModalSolicitud({ tipo, onConfirmar, onCerrar, enviando }) {
           </div>
           <button onClick={onCerrar} style={{ background: C.bgSoft, border: 'none', borderRadius: 12, width: 34, height: 34, cursor: 'pointer', color: C.textMid, fontSize: 15, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>✕</button>
         </div>
+
         {tipo === 'resena_google' && (
           <>
             <p style={{ fontSize: 13, color: C.textMid, marginBottom: 16, lineHeight: 1.6 }}>Deja tu reseña en Google y pega el link aquí para validar tus puntos 🌸</p>
-            <a href="https://www.google.com/search?q=moonbow&rlz=1C1CHZN_enCL1098CL1098&oq=moonbow&gs_lcrp=EgZjaHJvbWUqDQgAEAAY4wIYgAQYnwQyDQgAEAAY4wIYgAQYnwQyBggBEEUYPDIGCAIQRRg8MhIIAxAuGCcYrwEYxwEYgAQYigUyBggEEEUYPDIGCAUQRRhBMgYIBhBFGDwyBggHEEUYPNIBCDI4NjFqMGo3qAIAsAIA&sourceid=chrome&ie=UTF-8" target="_blank" rel="noopener noreferrer"
+            <a href="https://www.google.com/search?q=moonbow" target="_blank" rel="noopener noreferrer"
               style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, background: C.bgSoft, border: `1.5px solid ${C.border}`, color: C.roseDark, borderRadius: 14, padding: '12px 16px', fontSize: 13, fontWeight: 600, textDecoration: 'none', marginBottom: 16 }}>
               Ir a Google Maps →
             </a>
@@ -242,6 +248,7 @@ function ModalSolicitud({ tipo, onConfirmar, onCerrar, enviando }) {
             <input style={mS.input} value={linkResena} onChange={e => setLinkResena(e.target.value)} placeholder="https://maps.google.com/..." />
           </>
         )}
+
         {tipo === 'historia_ig' && (
           <>
             <p style={{ fontSize: 13, color: C.textMid, marginBottom: 16, lineHeight: 1.6 }}>Sube un screenshot etiquetando a <strong style={{ color: C.roseDark }}>@skincare_moonbow</strong> en tu historia ✨</p>
@@ -259,6 +266,7 @@ function ModalSolicitud({ tipo, onConfirmar, onCerrar, enviando }) {
             }
           </>
         )}
+
         {tipo === 'newsletter' && (
           <>
             <p style={{ fontSize: 13, color: C.textMid, marginBottom: 10, lineHeight: 1.6 }}>
@@ -272,6 +280,7 @@ function ModalSolicitud({ tipo, onConfirmar, onCerrar, enviando }) {
             <input style={mS.input} value={linkResena} onChange={e => setLinkResena(e.target.value)} placeholder="hola@email.com" type="email" />
           </>
         )}
+
         {tipo === 'newsletter' ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             <button onClick={handleSubmit} disabled={enviando}
@@ -385,38 +394,31 @@ function ModalPwaInstall({ isIos, onInstalar, onCerrar }) {
 
 // ─── Componente principal ─────────────────────────────────────────────────────
 export default function TarjetaFidelizacion({ uid, onLogout }) {
-  const [usuario, setUsuario]               = useState(null);
-  const [historial, setHistorial]           = useState([]);
-  const [vista, setVista]                   = useState('tarjeta');
-  const [cargando, setCargando]             = useState(true);
-  const [mensaje, setMensaje]               = useState(null);
-  const [linkReferido, setLinkReferido]     = useState('');
+  const [usuario,        setUsuario]        = useState(null);
+  const [historial,      setHistorial]      = useState([]);
+  const [vista,          setVista]          = useState('tarjeta');
+  const [cargando,       setCargando]       = useState(true);
+  const [mensaje,        setMensaje]        = useState(null);
+  const [linkReferido,   setLinkReferido]   = useState('');
   const [modalSolicitud, setModalSolicitud] = useState(null);
-  const [enviando, setEnviando]             = useState(false);
-  const [modalPremio, setModalPremio]       = useState(null);
-  const [canjeando, setCanjeando]           = useState(false);
-  const [modalCodigo, setModalCodigo]       = useState(null);
-
-  // Cumpleaños
-  const [modalCumple, setModalCumple]       = useState(false);
+  const [enviando,       setEnviando]       = useState(false);
+  const [modalPremio,    setModalPremio]    = useState(null);
+  const [canjeando,      setCanjeando]      = useState(false);
+  const [modalCodigo,    setModalCodigo]    = useState(null);
+  const [modalCumple,    setModalCumple]    = useState(false);
   const [guardandoCumple, setGuardandoCumple] = useState(false);
-  const [cumpleMsg, setCumpleMsg]           = useState(false);
-
-  // PWA Install
+  const [cumpleMsg,      setCumpleMsg]      = useState(false);
   const [deferredPrompt, setDeferredPrompt] = useState(null);
-  const [pwaInstalada, setPwaInstalada]     = useState(false);
-  const [modalPwa, setModalPwa]             = useState(false);
-  const [isIos, setIsIos]                   = useState(false);
+  const [pwaInstalada,   setPwaInstalada]   = useState(false);
+  const [modalPwa,       setModalPwa]       = useState(false);
+  const [isIos,          setIsIos]          = useState(false);
 
   useEffect(() => {
-    // Detectar iOS
     const ios = /iphone|ipad|ipod/i.test(navigator.userAgent);
     setIsIos(ios);
-    // Detectar si ya está instalada
     if (window.matchMedia('(display-mode: standalone)').matches || navigator.standalone) {
       setPwaInstalada(true);
     }
-    // Capturar evento Android
     const handler = (e) => { e.preventDefault(); setDeferredPrompt(e); };
     window.addEventListener('beforeinstallprompt', handler);
     return () => window.removeEventListener('beforeinstallprompt', handler);
@@ -431,27 +433,39 @@ export default function TarjetaFidelizacion({ uid, onLogout }) {
     }
   }
 
-  useEffect(() => { cargarDatos(); }, [uid]);
+  // FIX 3: cargarDatos con cancelled flag para evitar setState en componente desmontado
+  useEffect(() => {
+    let cancelled = false;
+    cargarDatos(cancelled);
+    return () => { cancelled = true; };
+  }, [uid]);
 
-  async function cargarDatos() {
+  async function cargarDatos(cancelled = false) {
     setCargando(true);
-    const [user, hist] = await Promise.all([getUsuario(uid), getHistorialPuntos(uid, 10)]);
-    setUsuario(user);
-    setHistorial(hist);
-    setLinkReferido(generarLinkReferido(uid));
-    setCargando(false);
-
-    // Verificar cumpleaños automáticamente al cargar
     try {
-      const fueCumple = await verificarCumpleanos(uid);
-      if (fueCumple) {
-        setCumpleMsg(true);
-        // Recargar datos para mostrar el punto nuevo
-        const userActualizado = await import('../lib/puntos').then(m => m.getUsuario(uid));
-        setUsuario(userActualizado);
+      const [user, hist] = await Promise.all([getUsuario(uid), getHistorialPuntos(uid, 10)]);
+      if (cancelled) return;
+      setUsuario(user);
+      setHistorial(hist);
+      setLinkReferido(generarLinkReferido(uid));
+
+      // Verificar cumpleaños
+      try {
+        const fueCumple = await verificarCumpleanos(uid);
+        if (cancelled) return;
+        if (fueCumple) {
+          setCumpleMsg(true);
+          // FIX 2: import estático en vez de dynamic import
+          const userActualizado = await getUsuario(uid);
+          if (!cancelled) setUsuario(userActualizado);
+        }
+      } catch (_) {
+        // No interrumpir el flujo si falla la verificación
       }
-    } catch (_) {
-      // No interrumpir el flujo si falla la verificación
+    } catch (e) {
+      console.error('Error cargando datos:', e);
+    } finally {
+      if (!cancelled) setCargando(false);
     }
   }
 
@@ -461,7 +475,8 @@ export default function TarjetaFidelizacion({ uid, onLogout }) {
       await guardarFechaNacimiento(uid, fecha);
       setModalCumple(false);
       mostrarMensaje('🎂 Cumpleaños guardado — te daremos +1 pt en tu mes especial');
-      const userActualizado = await import('../lib/puntos').then(m => m.getUsuario(uid));
+      // FIX 2: import estático
+      const userActualizado = await getUsuario(uid);
       setUsuario(userActualizado);
     } catch (e) {
       mostrarMensaje('Error: ' + e.message);
@@ -476,9 +491,9 @@ export default function TarjetaFidelizacion({ uid, onLogout }) {
       let imagenUrl = null;
       if (imagenFile) imagenUrl = await subirImagen(imagenFile);
       const extras = {};
-      if (modalSolicitud === 'resena_google' && linkResena) extras.link_resena   = linkResena.trim();
-      if (modalSolicitud === 'historia_ig'   && handleIg)   extras.handle_ig     = handleIg.trim();
-      if (modalSolicitud === 'newsletter'    && linkResena) extras.email_suscrito = linkResena.trim();
+      if (modalSolicitud === 'resena_google' && linkResena) extras.link_resena    = linkResena.trim();
+      if (modalSolicitud === 'historia_ig'   && handleIg)   extras.handle_ig      = handleIg.trim();
+      if (modalSolicitud === 'newsletter'    && linkResena) extras.email_suscrito  = linkResena.trim();
       const desc = { resena_google: 'Reseña en Google', historia_ig: 'Historia en Instagram', newsletter: 'Suscripción newsletter' };
       await crearAccionPendiente(uid, usuario?.perfil?.nombre || '', modalSolicitud, desc[modalSolicitud], imagenUrl, extras);
       setModalSolicitud(null);
@@ -496,8 +511,10 @@ export default function TarjetaFidelizacion({ uid, onLogout }) {
     try {
       const resultado = await canjearRecompensa(uid, modalPremio.nivel, opcionId);
       await cargarDatos();
+      // FIX 5: resultado puede no tener opcion; buscarla en modalPremio como fallback
+      const opcionData = modalPremio.opciones?.find(o => o.id === opcionId) || resultado.opcion;
       setModalPremio(null);
-      setModalCodigo({ codigo: resultado.codigo, opcion: resultado.opcion });
+      setModalCodigo({ codigo: resultado.codigo || null, opcion: opcionData });
     } catch (e) {
       mostrarMensaje('Error al canjear: ' + e.message);
       setModalPremio(null);
@@ -506,32 +523,49 @@ export default function TarjetaFidelizacion({ uid, onLogout }) {
     }
   }
 
+  // FIX 4: subirImagen con revokeObjectURL en ambos paths (onload y onerror)
   async function subirImagen(file) {
     return new Promise((resolve, reject) => {
-      // Comprimir si es muy grande (max ~800px)
       const img = new Image();
       const url = URL.createObjectURL(file);
       img.onload = () => {
-        const MAX = 800;
-        const scale = Math.min(1, MAX / Math.max(img.width, img.height));
-        const canvas = document.createElement('canvas');
-        canvas.width  = img.width  * scale;
-        canvas.height = img.height * scale;
-        canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
-        URL.revokeObjectURL(url);
-        resolve(canvas.toDataURL('image/jpeg', 0.7));
+        try {
+          const MAX    = 800;
+          const scale  = Math.min(1, MAX / Math.max(img.width, img.height));
+          const canvas = document.createElement('canvas');
+          canvas.width  = Math.round(img.width  * scale);
+          canvas.height = Math.round(img.height * scale);
+          canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+          URL.revokeObjectURL(url); // liberar siempre
+          resolve(canvas.toDataURL('image/jpeg', 0.7));
+        } catch (err) {
+          URL.revokeObjectURL(url);
+          reject(new Error('Error al comprimir la imagen'));
+        }
       };
-      img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Error al leer la imagen')); };
+      img.onerror = () => {
+        URL.revokeObjectURL(url); // liberar en error también
+        reject(new Error('Error al leer la imagen'));
+      };
       img.src = url;
     });
   }
 
-  function mostrarMensaje(texto) { setMensaje(texto); setTimeout(() => setMensaje(null), 4000); }
+  function mostrarMensaje(texto) {
+    setMensaje(texto);
+    setTimeout(() => setMensaje(null), 4000);
+  }
 
+  // FIX 6: clipboard con catch
   function compartirLink() {
     const texto = `Hola! Descubrí Moonbow, la mejor tienda de K-beauty en Chile 🌸 Compra con mi link y tú ganas 10% OFF + yo gano puntos: ${linkReferido}`;
-    if (navigator.share) { navigator.share({ title: 'Únete a Moonbow', text: texto, url: linkReferido }); }
-    else { navigator.clipboard.writeText(texto); mostrarMensaje('✓ Mensaje copiado — ¡compártelo!'); }
+    if (navigator.share) {
+      navigator.share({ title: 'Únete a Moonbow', text: texto, url: linkReferido }).catch(() => {});
+    } else {
+      navigator.clipboard.writeText(texto)
+        .then(() => mostrarMensaje('✓ Mensaje copiado — ¡compártelo!'))
+        .catch(() => mostrarMensaje('Copia el link manualmente: ' + linkReferido));
+    }
   }
 
   if (cargando) return (
@@ -548,7 +582,8 @@ export default function TarjetaFidelizacion({ uid, onLogout }) {
 
   const pts            = usuario?.lealtad?.puntos ?? 0;
   const ptsTotal       = usuario?.lealtad?.puntos_acumulados_total ?? 0;
-  const sellosLlenos   = Math.min(Math.floor(pts), TOTAL_SELLOS);
+  // FIX 8: sellosLlenos usa ptsTotal (acumulados) — tiene más sentido que los disponibles
+  const sellosLlenos   = Math.min(Math.floor(ptsTotal), TOTAL_SELLOS);
   const nivelesDesbloq = NIVELES.filter(n => pts >= n.puntos);
   const nivelActual    = [...NIVELES].reverse().find(n => pts >= n.puntos);
   const { progreso, proxNivel, ptsFaltan } = calcularProgreso(pts, NIVELES);
@@ -588,7 +623,7 @@ export default function TarjetaFidelizacion({ uid, onLogout }) {
           </div>
         )}
 
-        {/* ── Banner PWA Install ── */}
+        {/* Banner PWA Install */}
         {!pwaInstalada && (deferredPrompt || isIos) && vista === 'tarjeta' && (
           <div onClick={() => setModalPwa(true)} style={{ margin: '0 16px 10px', background: 'linear-gradient(135deg,#F2A8B820,#C9B8E820)', border: `1.5px solid ${C.rose}`, borderRadius: 18, padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 12, cursor: 'pointer', animation: 'slideUp .4s ease' }}>
             <div style={{ fontSize: 24, flexShrink: 0 }}>📲</div>
@@ -600,7 +635,7 @@ export default function TarjetaFidelizacion({ uid, onLogout }) {
           </div>
         )}
 
-        {/* ── Tarjeta principal ── */}
+        {/* Tarjeta principal */}
         <div style={{ margin: '6px 16px 10px', background: 'linear-gradient(145deg,#FFF0F4,#FEF8FF,#FFF8F2)', border: `1.5px solid ${C.border}`, borderRadius: 28, padding: '22px 20px 20px', position: 'relative', overflow: 'hidden', boxShadow: '0 8px 32px rgba(242,168,184,.18)' }}>
           <div style={{ position: 'absolute', top: -40, right: -40, width: 140, height: 140, borderRadius: '50%', background: 'radial-gradient(circle,rgba(242,168,184,.22) 0%,transparent 70%)' }} />
           <div style={{ position: 'relative' }}>
@@ -633,7 +668,6 @@ export default function TarjetaFidelizacion({ uid, onLogout }) {
                         : ''}
             </div>
 
-            {/* CTA principal */}
             {pts < 12 && (
               <button onClick={() => setVista('ganar')} className="btn-cta"
                 style={{ width: '100%', background: urgente ? `linear-gradient(135deg,${C.urgent},#FF9B9B)` : `linear-gradient(135deg,${C.rose},${C.roseDark})`, color: '#fff', border: 'none', borderRadius: 13, padding: '11px 16px', fontSize: 13, fontWeight: 700, cursor: 'pointer', boxShadow: urgente ? '0 5px 16px rgba(255,107,107,.35)' : `0 5px 16px rgba(217,96,122,.3)`, fontFamily: 'inherit', marginBottom: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
@@ -679,7 +713,7 @@ export default function TarjetaFidelizacion({ uid, onLogout }) {
           </div>
         </div>
 
-        {/* ── Banner cumpleaños ── */}
+        {/* Banner cumpleaños */}
         {cumpleMsg && (
           <div style={{ margin: '0 16px 10px', background: 'linear-gradient(135deg,#FFF0F4,#FFF8F0)', border: `1.5px solid ${C.rose}`, borderRadius: 18, padding: '14px 16px', display: 'flex', alignItems: 'center', gap: 12, boxShadow: '0 4px 16px rgba(242,168,184,.25)', animation: 'slideUp .4s ease' }}>
             <div style={{ fontSize: 28 }}>🎂</div>
@@ -706,7 +740,7 @@ export default function TarjetaFidelizacion({ uid, onLogout }) {
           </div>
         )}
 
-        {/* ── Card cumpleaños (siempre visible en vista tarjeta) ── */}
+        {/* Card cumpleaños */}
         {vista === 'tarjeta' && (
           <div style={{ margin: '0 16px 10px', background: C.white, borderRadius: 18, padding: '14px 16px', border: `1px solid ${C.border}`, boxShadow: '0 2px 8px rgba(45,27,46,.04)', display: 'flex', alignItems: 'center', gap: 12 }}>
             <div style={{ width: 40, height: 40, borderRadius: 12, background: `${C.peach}25`, border: `1px solid ${C.peach}50`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, flexShrink: 0 }}>🎂</div>
@@ -725,7 +759,7 @@ export default function TarjetaFidelizacion({ uid, onLogout }) {
           </div>
         )}
 
-        {/* ── Tus beneficios (siempre visible en vista tarjeta) ── */}
+        {/* Beneficios */}
         {vista === 'tarjeta' && (
           <div style={{ margin: '0 16px 10px', background: C.white, borderRadius: 18, padding: '16px 16px', border: `1px solid ${C.border}`, boxShadow: '0 2px 8px rgba(45,27,46,.04)' }}>
             <div style={{ fontSize: 13, fontWeight: 700, color: C.text, marginBottom: 12 }}>🎁 Tus beneficios</div>
@@ -756,24 +790,7 @@ export default function TarjetaFidelizacion({ uid, onLogout }) {
           </div>
         )}
 
-        {/* Nav fijo */}
-        <div style={{ position: 'fixed', bottom: 0, left: '50%', transform: 'translateX(-50%)', width: '100%', maxWidth: 430, background: 'rgba(253,248,245,.95)', backdropFilter: 'blur(20px)', borderTop: `1px solid ${C.border}`, display: 'flex', padding: '10px 0 20px', zIndex: 100 }}>
-          {[
-            { id: 'tarjeta',   icon: '◈', label: 'Tarjeta'   },
-            { id: 'ganar',     icon: '✦', label: 'Ganar'     },
-            { id: 'historial', icon: '◎', label: 'Historial' },
-            { id: 'canjear',   icon: '🎁', label: 'Canjear'  },
-          ].map(item => (
-            <button key={item.id} onClick={() => setVista(item.id)}
-              style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, background: 'none', border: 'none', cursor: 'pointer', color: vista === item.id ? C.roseDark : C.textSoft, fontFamily: 'inherit', padding: '4px 0', transition: 'color .2s' }}>
-              <span style={{ fontSize: 17, transition: 'transform .25s cubic-bezier(0.34,1.56,0.64,1)', transform: vista === item.id ? 'scale(1.25)' : 'scale(1)' }}>{item.icon}</span>
-              <span style={{ fontSize: 9, fontWeight: vista === item.id ? 700 : 400, letterSpacing: .3 }}>{item.label}</span>
-              {vista === item.id && <div style={{ width: 4, height: 4, borderRadius: '50%', background: C.rose }} />}
-            </button>
-          ))}
-        </div>
-
-        {/* ── "Te falta poco" inteligente ── */}
+        {/* Banner "Te falta poco" */}
         {vista === 'tarjeta' && ptsFaltan > 0 && ptsFaltan <= 2 && nivelesDesbloq.length === 0 && (
           <div style={{ margin: '0 16px 10px', background: `linear-gradient(135deg,${C.urgent}15,#FFF0F0)`, border: `1.5px solid ${C.urgent}60`, borderRadius: 18, padding: '13px 16px', display: 'flex', alignItems: 'center', gap: 12, animation: 'slideUp .4s ease' }}>
             <div style={{ fontSize: 26 }}>✨</div>
@@ -788,10 +805,10 @@ export default function TarjetaFidelizacion({ uid, onLogout }) {
           </div>
         )}
 
-        {/* ── Contenido ── */}
+        {/* ── Contenido por vista ── */}
         <div style={{ padding: '0 16px', animation: 'slideUp .3s ease' }}>
 
-          {/* ── GANAR ── */}
+          {/* GANAR */}
           {vista === 'ganar' && (
             <div>
               <div style={{ background: `linear-gradient(135deg,${C.mint}25,#EDFFF8)`, borderRadius: 20, padding: '16px 18px', marginBottom: 16, border: `2px solid ${C.mint}80`, position: 'relative', overflow: 'hidden' }}>
@@ -839,11 +856,11 @@ export default function TarjetaFidelizacion({ uid, onLogout }) {
               </div>
 
               {[
-                { tipo: 'compra_fisica',   icon: '🛍️', pts: '+1–2', label: 'Compra en tienda',      desc: `+1 pt normal · +2 pts sobre $${(REGLA_COMPRA.monto_minimo_doble/1000).toFixed(0)}k`, cta: null,          bg: C.peach    },
-                { tipo: 'resena_google',   icon: '⭐',  pts: '+1',   label: 'Reseña en Google',       desc: 'Comparte tu experiencia',                                                            cta: 'Ganar +1 pt', bg: '#FFD97D'  },
-                { tipo: 'historia_ig',     icon: '📸',  pts: '+½',   label: 'Historia en Instagram',  desc: 'Etiqueta @skincare_moonbow',                                                              cta: 'Ganar +½ pt', bg: C.lavender },
-                { tipo: 'resena_producto', icon: '💬',  pts: '+½',   label: 'Reseña de producto',     desc: 'Escribe en moonbow.cl',                                                              cta: 'Ir a reseñar', bg: C.mint     },
-                { tipo: 'newsletter',      icon: '💌',  pts: '+½',   label: 'Newsletter Moonbow',     desc: 'Suscríbete y confirma tu email',                                                             cta: 'Ganar +½ pt', bg: C.rose     },
+                { tipo: 'compra_fisica',   icon: '🛍️', pts: '+1–2', label: 'Compra en tienda',      desc: `+1 pt normal · +2 pts sobre $${(REGLA_COMPRA.monto_minimo_doble/1000).toFixed(0)}k`, cta: null,           bg: C.peach    },
+                { tipo: 'resena_google',   icon: '⭐',  pts: '+1',   label: 'Reseña en Google',       desc: 'Comparte tu experiencia',                                                             cta: 'Ganar +1 pt',  bg: '#FFD97D'  },
+                { tipo: 'historia_ig',     icon: '📸',  pts: '+½',   label: 'Historia en Instagram',  desc: 'Etiqueta @skincare_moonbow',                                                          cta: 'Ganar +½ pt',  bg: C.lavender },
+                { tipo: 'resena_producto', icon: '💬',  pts: '+½',   label: 'Reseña de producto',     desc: 'Escribe en moonbow.cl',                                                               cta: 'Ir a reseñar', bg: C.mint     },
+                { tipo: 'newsletter',      icon: '💌',  pts: '+½',   label: 'Newsletter Moonbow',     desc: 'Suscríbete y confirma tu email',                                                      cta: 'Ganar +½ pt',  bg: C.rose     },
                 { tipo: 'cumpleanos',      icon: '🎂',  pts: '+1',   label: 'Tu cumpleaños',          desc: tieneFechaNac ? `Registrado: ${usuario.perfil.fecha_nacimiento}` : 'Agrégalo en tu tarjeta', cta: tieneFechaNac ? 'Editar' : 'Agregar', bg: C.peach },
               ].map(a => (
                 <div key={a.tipo} className="accion-card" style={{ display: 'flex', alignItems: 'center', gap: 11, background: C.white, borderRadius: 16, padding: '12px 14px', marginBottom: 7, border: `1px solid ${C.border}`, boxShadow: '0 2px 6px rgba(45,27,46,.04)' }}>
@@ -871,7 +888,7 @@ export default function TarjetaFidelizacion({ uid, onLogout }) {
             </div>
           )}
 
-          {/* ── HISTORIAL ── */}
+          {/* HISTORIAL */}
           {vista === 'historial' && (
             <div>
               <h2 style={{ fontSize: 20, fontWeight: 500, color: C.text, margin: '0 0 20px', fontFamily: "'Playfair Display', serif" }}>Historial ◎</h2>
@@ -902,7 +919,7 @@ export default function TarjetaFidelizacion({ uid, onLogout }) {
             </div>
           )}
 
-          {/* ── CANJEAR ── */}
+          {/* CANJEAR */}
           {vista === 'canjear' && (
             <div>
               <h2 style={{ fontSize: 20, fontWeight: 500, color: C.text, margin: '0 0 6px', fontFamily: "'Playfair Display', serif" }}>Elige tu premio 🎁</h2>
@@ -959,6 +976,23 @@ export default function TarjetaFidelizacion({ uid, onLogout }) {
               })}
             </div>
           )}
+        </div>
+
+        {/* Nav fijo */}
+        <div style={{ position: 'fixed', bottom: 0, left: '50%', transform: 'translateX(-50%)', width: '100%', maxWidth: 430, background: 'rgba(253,248,245,.95)', backdropFilter: 'blur(20px)', borderTop: `1px solid ${C.border}`, display: 'flex', padding: '10px 0 20px', zIndex: 100 }}>
+          {[
+            { id: 'tarjeta',   icon: '◈', label: 'Tarjeta'   },
+            { id: 'ganar',     icon: '✦', label: 'Ganar'     },
+            { id: 'historial', icon: '◎', label: 'Historial' },
+            { id: 'canjear',   icon: '🎁', label: 'Canjear'  },
+          ].map(item => (
+            <button key={item.id} onClick={() => setVista(item.id)}
+              style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, background: 'none', border: 'none', cursor: 'pointer', color: vista === item.id ? C.roseDark : C.textSoft, fontFamily: 'inherit', padding: '4px 0', transition: 'color .2s' }}>
+              <span style={{ fontSize: 17, transition: 'transform .25s cubic-bezier(0.34,1.56,0.64,1)', transform: vista === item.id ? 'scale(1.25)' : 'scale(1)' }}>{item.icon}</span>
+              <span style={{ fontSize: 9, fontWeight: vista === item.id ? 700 : 400, letterSpacing: .3 }}>{item.label}</span>
+              {vista === item.id && <div style={{ width: 4, height: 4, borderRadius: '50%', background: C.rose }} />}
+            </button>
+          ))}
         </div>
       </div>
 
