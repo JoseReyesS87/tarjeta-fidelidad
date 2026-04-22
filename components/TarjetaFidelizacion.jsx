@@ -345,6 +345,44 @@ const mS = {
   input: { width: '100%', background: C.bgSoft, border: `1.5px solid ${C.border}`, borderRadius: 12, padding: '12px 14px', color: C.text, fontSize: 14, marginBottom: 14, boxSizing: 'border-box', outline: 'none', fontFamily: 'inherit' },
 };
 
+// ─── Modal instalación PWA ────────────────────────────────────────────────────
+function ModalPwaInstall({ isIos, onInstalar, onCerrar }) {
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(45,27,46,0.6)', backdropFilter: 'blur(14px)', display: 'flex', alignItems: 'flex-end', zIndex: 300 }} onClick={onCerrar}>
+      <div style={{ background: C.white, borderRadius: '28px 28px 0 0', padding: '10px 22px 48px', width: '100%', maxWidth: 430, margin: '0 auto', boxShadow: '0 -8px 40px rgba(45,27,46,0.18)' }} onClick={e => e.stopPropagation()}>
+        <div style={{ width: 36, height: 4, background: C.border, borderRadius: 99, margin: '0 auto 22px' }} />
+        <div style={{ textAlign: 'center', marginBottom: 22 }}>
+          <div style={{ fontSize: 52, marginBottom: 10 }}>📲</div>
+          <div style={{ fontSize: 20, fontWeight: 700, color: C.text, fontFamily: "'Playfair Display', serif", marginBottom: 6 }}>Guarda tu tarjeta</div>
+          <div style={{ fontSize: 13, color: C.textSoft, lineHeight: 1.6 }}>Accede a tus puntos en 1 toque, sin recordar contraseñas ni URLs.</div>
+        </div>
+        {isIos ? (
+          <div style={{ background: C.bgSoft, borderRadius: 18, padding: '16px 18px', border: `1px solid ${C.border}`, marginBottom: 18 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: C.text, marginBottom: 12 }}>Pasos para iPhone / iPad:</div>
+            {[
+              { n: '1', icon: '⬆️', text: 'Toca el botón Compartir en la barra de Safari' },
+              { n: '2', icon: '➕', text: 'Desliza y toca "Agregar a pantalla de inicio"' },
+              { n: '3', icon: '✅', text: 'Toca "Agregar" — ¡listo!' },
+            ].map(s => (
+              <div key={s.n} style={{ display: 'flex', gap: 12, alignItems: 'flex-start', marginBottom: 10 }}>
+                <div style={{ width: 26, height: 26, borderRadius: '50%', background: `linear-gradient(135deg,${C.rose},${C.roseDark})`, color: '#fff', fontSize: 11, fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>{s.n}</div>
+                <div style={{ fontSize: 13, color: C.textMid, lineHeight: 1.5, paddingTop: 3 }}><span style={{ fontSize: 16 }}>{s.icon}</span> {s.text}</div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <button onClick={onInstalar} style={{ width: '100%', background: `linear-gradient(135deg,${C.rose},${C.roseDark})`, color: '#fff', border: 'none', borderRadius: 16, padding: 16, fontSize: 15, fontWeight: 700, cursor: 'pointer', boxShadow: `0 6px 20px rgba(217,96,122,.3)`, fontFamily: 'inherit', marginBottom: 12 }}>
+            ✦ Instalar en mi celular
+          </button>
+        )}
+        <button onClick={onCerrar} style={{ width: '100%', background: 'none', border: `1px solid ${C.border}`, color: C.textMid, borderRadius: 14, padding: 13, fontSize: 13, cursor: 'pointer', fontFamily: 'inherit' }}>
+          Ahora no
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ─── Componente principal ─────────────────────────────────────────────────────
 export default function TarjetaFidelizacion({ uid, onLogout }) {
   const [usuario, setUsuario]               = useState(null);
@@ -363,6 +401,35 @@ export default function TarjetaFidelizacion({ uid, onLogout }) {
   const [modalCumple, setModalCumple]       = useState(false);
   const [guardandoCumple, setGuardandoCumple] = useState(false);
   const [cumpleMsg, setCumpleMsg]           = useState(false);
+
+  // PWA Install
+  const [deferredPrompt, setDeferredPrompt] = useState(null);
+  const [pwaInstalada, setPwaInstalada]     = useState(false);
+  const [modalPwa, setModalPwa]             = useState(false);
+  const [isIos, setIsIos]                   = useState(false);
+
+  useEffect(() => {
+    // Detectar iOS
+    const ios = /iphone|ipad|ipod/i.test(navigator.userAgent);
+    setIsIos(ios);
+    // Detectar si ya está instalada
+    if (window.matchMedia('(display-mode: standalone)').matches || navigator.standalone) {
+      setPwaInstalada(true);
+    }
+    // Capturar evento Android
+    const handler = (e) => { e.preventDefault(); setDeferredPrompt(e); };
+    window.addEventListener('beforeinstallprompt', handler);
+    return () => window.removeEventListener('beforeinstallprompt', handler);
+  }, []);
+
+  async function instalarPwa() {
+    if (deferredPrompt) {
+      deferredPrompt.prompt();
+      const { outcome } = await deferredPrompt.userChoice;
+      if (outcome === 'accepted') { setPwaInstalada(true); setDeferredPrompt(null); }
+      setModalPwa(false);
+    }
+  }
 
   useEffect(() => { cargarDatos(); }, [uid]);
 
@@ -521,6 +588,18 @@ export default function TarjetaFidelizacion({ uid, onLogout }) {
           </div>
         )}
 
+        {/* ── Banner PWA Install ── */}
+        {!pwaInstalada && (deferredPrompt || isIos) && vista === 'tarjeta' && (
+          <div onClick={() => setModalPwa(true)} style={{ margin: '0 16px 10px', background: 'linear-gradient(135deg,#F2A8B820,#C9B8E820)', border: `1.5px solid ${C.rose}`, borderRadius: 18, padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 12, cursor: 'pointer', animation: 'slideUp .4s ease' }}>
+            <div style={{ fontSize: 24, flexShrink: 0 }}>📲</div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: C.text }}>Guarda tu tarjeta en el celular</div>
+              <div style={{ fontSize: 11, color: C.textSoft, marginTop: 1 }}>Accede en 1 toque desde tu pantalla de inicio</div>
+            </div>
+            <div style={{ fontSize: 11, fontWeight: 700, color: C.roseDark, background: `${C.rose}25`, borderRadius: 99, padding: '5px 11px', flexShrink: 0 }}>Instalar →</div>
+          </div>
+        )}
+
         {/* ── Tarjeta principal ── */}
         <div style={{ margin: '6px 16px 10px', background: 'linear-gradient(145deg,#FFF0F4,#FEF8FF,#FFF8F2)', border: `1.5px solid ${C.border}`, borderRadius: 28, padding: '22px 20px 20px', position: 'relative', overflow: 'hidden', boxShadow: '0 8px 32px rgba(242,168,184,.18)' }}>
           <div style={{ position: 'absolute', top: -40, right: -40, width: 140, height: 140, borderRadius: '50%', background: 'radial-gradient(circle,rgba(242,168,184,.22) 0%,transparent 70%)' }} />
@@ -540,13 +619,28 @@ export default function TarjetaFidelizacion({ uid, onLogout }) {
               <span style={{ fontSize: 16, color: C.textSoft }}>pts</span>
             </div>
             <div style={{ fontSize: 12, color: C.textSoft, marginBottom: 4 }}>{ptsTotal} acumulados en total</div>
-            <div style={{ fontSize: 12, color: C.textMid, fontWeight: 500, marginBottom: 18 }}>
-              {pts >= 12 ? '👑 Nivel máximo — ¡Eres Moonbow Elite!'
-               : pts >= 8  ? `💖 Te acercas a 20% OFF + regalo exclusivo`
-               : pts >= 5  ? `🏷️ ¡Ya tienes 10% OFF disponible!`
-               : proxNivel ? `🎁 Con ${ptsFaltan.toFixed(1)} pts más → ${proxNivel.opciones[0].label}`
-               : ''}
+            <div style={{ fontSize: 12, color: C.textMid, fontWeight: 600, marginBottom: 4 }}>
+              {pts >= 12
+                ? '👑 Nivel máximo — ¡Eres Moonbow Elite!'
+                : urgente
+                  ? `🔥 Estás a ${accionesFaltantes(ptsFaltan)} de tu premio`
+                  : pts >= 8
+                    ? '💖 Te acercas a 20% OFF + regalo exclusivo'
+                    : pts >= 5
+                      ? '🏷️ ¡Ya tienes 10% OFF disponible!'
+                      : proxNivel
+                        ? `🎁 Desbloquea ${proxNivel.opciones[0].label} con ${ptsFaltan.toFixed(1)} pts más`
+                        : ''}
             </div>
+
+            {/* CTA principal */}
+            {pts < 12 && (
+              <button onClick={() => setVista('ganar')} className="btn-cta"
+                style={{ width: '100%', background: urgente ? `linear-gradient(135deg,${C.urgent},#FF9B9B)` : `linear-gradient(135deg,${C.rose},${C.roseDark})`, color: '#fff', border: 'none', borderRadius: 13, padding: '11px 16px', fontSize: 13, fontWeight: 700, cursor: 'pointer', boxShadow: urgente ? '0 5px 16px rgba(255,107,107,.35)' : `0 5px 16px rgba(217,96,122,.3)`, fontFamily: 'inherit', marginBottom: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+                {urgente ? '🔥 ¡Ganar puntos ahora!' : '✦ Ganar puntos ahora'}
+                <span style={{ fontSize: 11, opacity: .85 }}>→</span>
+              </button>
+            )}
 
             <div style={{ fontSize: 11, color: C.textMid, fontWeight: 600, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
               Tu rutina completa
@@ -631,6 +725,37 @@ export default function TarjetaFidelizacion({ uid, onLogout }) {
           </div>
         )}
 
+        {/* ── Tus beneficios (siempre visible en vista tarjeta) ── */}
+        {vista === 'tarjeta' && (
+          <div style={{ margin: '0 16px 10px', background: C.white, borderRadius: 18, padding: '16px 16px', border: `1px solid ${C.border}`, boxShadow: '0 2px 8px rgba(45,27,46,.04)' }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: C.text, marginBottom: 12 }}>🎁 Tus beneficios</div>
+            {NIVELES.map(nivel => {
+              const desbloqueado = pts >= nivel.puntos;
+              const t = TIER_COLORS[nivel.tier] || TIER_COLORS.bronze;
+              return (
+                <div key={nivel.nivel} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8, opacity: desbloqueado ? 1 : 0.5 }}>
+                  <div style={{ width: 28, height: 28, borderRadius: '50%', background: desbloqueado ? `linear-gradient(135deg,${t.from},${t.to})` : C.border, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, flexShrink: 0 }}>
+                    {desbloqueado ? '✦' : '○'}
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: desbloqueado ? C.roseDark : C.textSoft }}>{nivel.puntos} pts → </span>
+                    <span style={{ fontSize: 12, color: desbloqueado ? C.text : C.textSoft }}>{nivel.opciones.map(o => o.label).join(' o ')}</span>
+                  </div>
+                  {desbloqueado && (
+                    <div style={{ fontSize: 10, fontWeight: 700, color: C.green, background: C.greenBg, borderRadius: 99, padding: '2px 8px', flexShrink: 0 }}>Lista ✓</div>
+                  )}
+                </div>
+              );
+            })}
+            {nivelesDesbloq.length > 0 && (
+              <button onClick={() => setVista('canjear')} className="btn-cta"
+                style={{ width: '100%', background: `linear-gradient(135deg,${C.green},#3A9E78)`, color: '#fff', border: 'none', borderRadius: 12, padding: '10px', fontSize: 13, fontWeight: 700, cursor: 'pointer', marginTop: 8, fontFamily: 'inherit' }}>
+                Canjear mi recompensa →
+              </button>
+            )}
+          </div>
+        )}
+
         {/* Nav fijo */}
         <div style={{ position: 'fixed', bottom: 0, left: '50%', transform: 'translateX(-50%)', width: '100%', maxWidth: 430, background: 'rgba(253,248,245,.95)', backdropFilter: 'blur(20px)', borderTop: `1px solid ${C.border}`, display: 'flex', padding: '10px 0 20px', zIndex: 100 }}>
           {[
@@ -647,6 +772,21 @@ export default function TarjetaFidelizacion({ uid, onLogout }) {
             </button>
           ))}
         </div>
+
+        {/* ── "Te falta poco" inteligente ── */}
+        {vista === 'tarjeta' && ptsFaltan > 0 && ptsFaltan <= 2 && nivelesDesbloq.length === 0 && (
+          <div style={{ margin: '0 16px 10px', background: `linear-gradient(135deg,${C.urgent}15,#FFF0F0)`, border: `1.5px solid ${C.urgent}60`, borderRadius: 18, padding: '13px 16px', display: 'flex', alignItems: 'center', gap: 12, animation: 'slideUp .4s ease' }}>
+            <div style={{ fontSize: 26 }}>✨</div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: C.text }}>¡Estás muy cerca!</div>
+              <div style={{ fontSize: 12, color: C.textMid, marginTop: 1 }}>Compra cualquier producto y obtén tu recompensa hoy</div>
+            </div>
+            <a href="https://moonbow.cl/collections/all" target="_blank" rel="noopener noreferrer" className="btn-cta"
+              style={{ background: `linear-gradient(135deg,${C.urgent},#FF9B9B)`, color: '#fff', border: 'none', borderRadius: 12, padding: '8px 13px', fontSize: 11, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap', textDecoration: 'none', flexShrink: 0, fontFamily: 'inherit' }}>
+              Ver →
+            </a>
+          </div>
+        )}
 
         {/* ── Contenido ── */}
         <div style={{ padding: '0 16px', animation: 'slideUp .3s ease' }}>
@@ -804,7 +944,11 @@ export default function TarjetaFidelizacion({ uid, onLogout }) {
                       </button>
                     ) : (
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 10 }}>
-                        <div style={{ fontSize: 12, color: C.textSoft, fontStyle: 'italic' }}>Faltan {(nivel.puntos - pts).toFixed(1)} pts</div>
+                        <div style={{ fontSize: 12, color: C.textSoft, fontStyle: 'italic' }}>
+                          {(nivel.puntos - pts) <= 1
+                            ? `🔥 ¡A ${accionesFaltantes(nivel.puntos - pts)} de lograrlo!`
+                            : `Faltan ${(nivel.puntos - pts).toFixed(1)} pts`}
+                        </div>
                         <button onClick={() => setVista('ganar')} style={{ background: 'none', border: `1px solid ${C.border}`, color: C.textMid, borderRadius: 8, padding: '5px 12px', fontSize: 11, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>
                           Ganar puntos →
                         </button>
@@ -823,6 +967,7 @@ export default function TarjetaFidelizacion({ uid, onLogout }) {
       {modalPremio    && <ModalPremio    nivel={modalPremio}    canjeando={canjeando} onConfirmar={handleConfirmarPremio}  onCerrar={() => setModalPremio(null)} />}
       {modalCodigo    && <ModalCodigo    codigo={modalCodigo.codigo} opcion={modalCodigo.opcion} onCerrar={() => { setModalCodigo(null); setVista('tarjeta'); }} />}
       {modalCumple    && <ModalCumpleanos fechaActual={usuario.perfil?.fecha_nacimiento} onGuardar={handleGuardarCumpleanos} onCerrar={() => setModalCumple(false)} guardando={guardandoCumple} />}
+      {modalPwa       && <ModalPwaInstall isIos={isIos} onInstalar={instalarPwa} onCerrar={() => setModalPwa(false)} />}
     </div>
   );
 }
