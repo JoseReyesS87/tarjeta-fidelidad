@@ -18,6 +18,7 @@ import {
   NIVELES, TOTAL_SELLOS, REGLA_COMPRA,
 } from '../lib/puntos';
 import { C } from '@/lib/colores'; // FIX 1: importar paleta compartida
+import TabRutina from './TabRutina';
 
 const TIER_COLORS = {
   bronze: { from: '#F2C4A0', to: '#E89878' },
