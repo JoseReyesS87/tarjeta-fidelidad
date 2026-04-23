@@ -140,51 +140,51 @@ async function buscarProductoPorBarcode(barcode) {
 }
 
 // ─── Modal: escaneo de código de barras ──────────────────────────────────────
+// Soporta 3 modos:
+//   1. Cámara con BarcodeDetector (Chrome Android, Samsung Browser)
+//   2. Input de texto manual para escribir/pegar el código (fallback universal)
+//   3. Estado de búsqueda mientras consulta la API
 function ModalEscaneo({ onProductoEncontrado, onCerrar }) {
-  const videoRef   = useRef(null);
-  const streamRef  = useRef(null);
+  const videoRef    = useRef(null);
+  const streamRef   = useRef(null);
   const detectorRef = useRef(null);
-  const rafRef     = useRef(null);
+  const rafRef      = useRef(null);
 
-  const [estado,   setEstado]   = useState('iniciando'); // iniciando | escaneando | buscando | error
-  const [errorMsg, setErrorMsg] = useState('');
+  // modo: 'detectando' | 'camara' | 'manual' | 'buscando' | 'noEncontrado'
+  const [modo,        setModo]       = useState('detectando');
+  const [codigoInput, setCodigoInput] = useState('');
+  const [buscando,    setBuscando]   = useState(false);
+  const [errorBusq,   setErrorBusq]  = useState('');
 
   useEffect(() => {
-    async function iniciarCamara() {
+    async function iniciar() {
+      // ¿Soporta BarcodeDetector?
+      if (!('BarcodeDetector' in window)) {
+        setModo('manual');
+        return;
+      }
+      // ¿Tiene cámara disponible?
       try {
-        // Verificar soporte de BarcodeDetector
-        if (!('BarcodeDetector' in window)) {
-          setEstado('error');
-          setErrorMsg('Tu navegador no soporta el escáner de códigos. Ingresa el nombre manualmente.');
-          return;
-        }
-
         detectorRef.current = new window.BarcodeDetector({
           formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'code_39', 'qr_code'],
         });
-
         const stream = await navigator.mediaDevices.getUserMedia({
           video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
         });
-
         streamRef.current = stream;
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
           await videoRef.current.play();
         }
-
-        setEstado('escaneando');
+        setModo('camara');
         escanearLoop();
       } catch (e) {
-        setEstado('error');
-        setErrorMsg('No se pudo acceder a la cámara. Verifica los permisos.');
+        // Sin permiso de cámara o sin cámara → fallback manual
+        setModo('manual');
       }
     }
-
-    iniciarCamara();
-
+    iniciar();
     return () => {
-      // Cleanup: detener cámara y loop
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
       if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
     };
@@ -196,107 +196,145 @@ function ModalEscaneo({ onProductoEncontrado, onCerrar }) {
       const barcodes = await detectorRef.current.detect(videoRef.current);
       if (barcodes.length > 0) {
         const rawValue = barcodes[0].rawValue;
-        setEstado('buscando');
-        if (rafRef.current) cancelAnimationFrame(rafRef.current);
-        // Detener cámara al detectar
         if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
-
-        try {
-          const producto = await buscarProductoPorBarcode(rawValue);
-          if (producto) {
-            onProductoEncontrado(producto);
-          } else {
-            setEstado('error');
-            setErrorMsg(`Código ${rawValue} no encontrado en Moonbow. Ingresa el nombre manualmente.`);
-          }
-        } catch (e) {
-          setEstado('error');
-          setErrorMsg('Error al buscar el producto. Verifica tu conexión.');
-        }
+        if (rafRef.current) cancelAnimationFrame(rafRef.current);
+        await buscarYNotificar(rawValue);
         return;
       }
-    } catch (e) {
-      // Error de detección puntual, seguir escaneando
-    }
+    } catch (e) { /* continuar */ }
     rafRef.current = requestAnimationFrame(escanearLoop);
   }
 
+  async function buscarYNotificar(codigo) {
+    setBuscando(true);
+    setErrorBusq('');
+    setModo('buscando');
+    try {
+      const producto = await buscarProductoPorBarcode(codigo.trim());
+      if (producto) {
+        onProductoEncontrado(producto);
+      } else {
+        setErrorBusq(`No se encontró "${codigo}" en Moonbow.`);
+        setModo('manual');
+      }
+    } catch (e) {
+      setErrorBusq('Error de conexión. Intenta de nuevo.');
+      setModo('manual');
+    } finally {
+      setBuscando(false);
+    }
+  }
+
+  async function handleBuscarManual(e) {
+    e.preventDefault();
+    if (!codigoInput.trim()) return;
+    await buscarYNotificar(codigoInput);
+  }
+
   return (
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(10,5,12,0.92)', backdropFilter: 'blur(16px)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', zIndex: 600 }}>
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(10,5,12,0.92)', backdropFilter: 'blur(16px)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', zIndex: 600, padding: '0 24px' }}>
 
       {/* Header */}
       <div style={{ position: 'absolute', top: 0, left: 0, right: 0, padding: '20px 22px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div style={{ fontSize: 15, fontWeight: 700, color: '#fff' }}>📷 Escanear código</div>
+        <div style={{ fontSize: 15, fontWeight: 700, color: '#fff' }}>
+          {modo === 'camara' ? '📷 Escanear código' : '🔍 Buscar producto'}
+        </div>
         <button onClick={onCerrar} style={{ background: 'rgba(255,255,255,0.12)', border: 'none', color: '#fff', borderRadius: 10, padding: '8px 14px', fontSize: 13, cursor: 'pointer', fontFamily: 'inherit' }}>
           Cancelar
         </button>
       </div>
 
-      {/* Video / Estado */}
-      {(estado === 'iniciando' || estado === 'escaneando') && (
-        <div style={{ position: 'relative', width: '85vw', maxWidth: 340, aspectRatio: '1/1', borderRadius: 24, overflow: 'hidden', border: '2px solid rgba(242,168,184,0.5)' }}>
-          <video
-            ref={videoRef}
-            muted
-            playsInline
-            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-          />
-          {/* Visor tipo scanner */}
-          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <div style={{ width: '70%', height: '30%', border: '2px solid rgba(242,168,184,0.9)', borderRadius: 8, position: 'relative' }}>
-              {/* Esquinas */}
-              {[['top','left'],['top','right'],['bottom','left'],['bottom','right']].map(([v,h]) => (
-                <div key={`${v}${h}`} style={{
-                  position: 'absolute',
-                  [v]: -2, [h]: -2,
-                  width: 16, height: 16,
-                  borderTop:    v === 'top'    ? '3px solid #F2A8B8' : 'none',
-                  borderBottom: v === 'bottom' ? '3px solid #F2A8B8' : 'none',
-                  borderLeft:   h === 'left'   ? '3px solid #F2A8B8' : 'none',
-                  borderRight:  h === 'right'  ? '3px solid #F2A8B8' : 'none',
-                }} />
-              ))}
-              {/* Línea de scan animada */}
-              <div style={{
-                position: 'absolute', left: 0, right: 0, height: 2,
-                background: 'linear-gradient(90deg, transparent, #F2A8B8, transparent)',
-                animation: 'scanLine 1.8s ease-in-out infinite',
-              }} />
+      {/* ── Vista: cámara ── */}
+      {modo === 'camara' && (
+        <>
+          <div style={{ position: 'relative', width: '85vw', maxWidth: 340, aspectRatio: '1/1', borderRadius: 24, overflow: 'hidden', border: '2px solid rgba(242,168,184,0.5)' }}>
+            <video ref={videoRef} muted playsInline style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+            <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <div style={{ width: '70%', height: '30%', border: '2px solid rgba(242,168,184,0.9)', borderRadius: 8, position: 'relative' }}>
+                {[['top','left'],['top','right'],['bottom','left'],['bottom','right']].map(([v,h]) => (
+                  <div key={`${v}${h}`} style={{ position: 'absolute', [v]: -2, [h]: -2, width: 16, height: 16, borderTop: v==='top'?'3px solid #F2A8B8':'none', borderBottom: v==='bottom'?'3px solid #F2A8B8':'none', borderLeft: h==='left'?'3px solid #F2A8B8':'none', borderRight: h==='right'?'3px solid #F2A8B8':'none' }} />
+                ))}
+                <div style={{ position: 'absolute', left: 0, right: 0, height: 2, background: 'linear-gradient(90deg, transparent, #F2A8B8, transparent)', animation: 'scanLine 1.8s ease-in-out infinite' }} />
+              </div>
             </div>
           </div>
-        </div>
+          <div style={{ marginTop: 20, fontSize: 13, color: 'rgba(255,255,255,0.6)', textAlign: 'center', marginBottom: 16 }}>
+            Apunta al código de barras del producto
+          </div>
+          <button onClick={() => { if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop()); setModo('manual'); }}
+            style={{ background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)', color: '#fff', borderRadius: 10, padding: '9px 18px', fontSize: 12, cursor: 'pointer', fontFamily: 'inherit' }}>
+            ✎ Ingresar código manualmente
+          </button>
+        </>
       )}
 
-      {estado === 'buscando' && (
+      {/* ── Vista: buscando ── */}
+      {modo === 'buscando' && (
         <div style={{ textAlign: 'center', color: '#fff' }}>
           <div style={{ fontSize: 48, marginBottom: 16, animation: 'spin 1.2s linear infinite' }}>✦</div>
           <div style={{ fontSize: 15, fontWeight: 600 }}>Buscando en Moonbow...</div>
         </div>
       )}
 
-      {estado === 'error' && (
-        <div style={{ background: 'rgba(255,255,255,0.08)', borderRadius: 20, padding: '28px 24px', maxWidth: 300, textAlign: 'center' }}>
-          <div style={{ fontSize: 40, marginBottom: 14 }}>😕</div>
-          <div style={{ fontSize: 14, color: '#fff', lineHeight: 1.6, marginBottom: 20 }}>{errorMsg}</div>
-          <button onClick={onCerrar} style={{ background: `linear-gradient(135deg,${C.rose},${C.roseDark})`, color: '#fff', border: 'none', borderRadius: 12, padding: '12px 24px', fontSize: 14, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
-            Ingresar manualmente
+      {/* ── Vista: manual ── */}
+      {modo === 'manual' && (
+        <div style={{ width: '100%', maxWidth: 340 }}>
+          <div style={{ textAlign: 'center', marginBottom: 24 }}>
+            <div style={{ fontSize: 36, marginBottom: 10 }}>🔢</div>
+            <div style={{ fontSize: 15, fontWeight: 700, color: '#fff', marginBottom: 6 }}>
+              Ingresa el código de barras
+            </div>
+            <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.5)', lineHeight: 1.5 }}>
+              Escribe o pega el número que aparece bajo el código de barras del producto
+            </div>
+          </div>
+
+          {errorBusq && (
+            <div style={{ background: 'rgba(255,80,80,0.15)', border: '1px solid rgba(255,80,80,0.3)', borderRadius: 12, padding: '10px 14px', marginBottom: 14, fontSize: 12, color: '#FF8080', textAlign: 'center' }}>
+              {errorBusq}
+            </div>
+          )}
+
+          <form onSubmit={handleBuscarManual} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <input
+              type="text"
+              inputMode="numeric"
+              placeholder="Ej: 8801234567890"
+              value={codigoInput}
+              onChange={e => setCodigoInput(e.target.value)}
+              autoFocus
+              style={{
+                width: '100%',
+                background: 'rgba(255,255,255,0.1)',
+                border: '1.5px solid rgba(242,168,184,0.5)',
+                borderRadius: 14,
+                padding: '14px 16px',
+                color: '#fff',
+                fontSize: 18,
+                letterSpacing: 2,
+                textAlign: 'center',
+                outline: 'none',
+                fontFamily: 'inherit',
+                boxSizing: 'border-box',
+              }}
+            />
+            <button
+              type="submit"
+              disabled={buscando || !codigoInput.trim()}
+              style={{ background: `linear-gradient(135deg,${C.rose},${C.roseDark})`, color: '#fff', border: 'none', borderRadius: 14, padding: '14px 0', fontSize: 14, fontWeight: 700, cursor: 'pointer', opacity: buscando || !codigoInput.trim() ? 0.6 : 1, fontFamily: 'inherit' }}>
+              {buscando ? 'Buscando...' : '🔍 Buscar en Moonbow'}
+            </button>
+          </form>
+
+          <button onClick={onCerrar} style={{ width: '100%', marginTop: 12, background: 'transparent', border: 'none', color: 'rgba(255,255,255,0.4)', fontSize: 13, cursor: 'pointer', fontFamily: 'inherit' }}>
+            Cancelar y asignar sin vincular
           </button>
         </div>
       )}
 
-      {estado === 'escaneando' && (
-        <div style={{ marginTop: 24, fontSize: 13, color: 'rgba(255,255,255,0.6)', textAlign: 'center' }}>
-          Apunta al código de barras del producto
-        </div>
-      )}
-
       <style>{`
-        @keyframes scanLine {
-          0%   { top: 0%; }
-          50%  { top: calc(100% - 2px); }
-          100% { top: 0%; }
-        }
-        @keyframes spin { to { transform: rotate(360deg); } }
+        @keyframes scanLine { 0% { top: 0% } 50% { top: calc(100% - 2px) } 100% { top: 0% } }
+        @keyframes spin { to { transform: rotate(360deg) } }
       `}</style>
     </div>
   );
