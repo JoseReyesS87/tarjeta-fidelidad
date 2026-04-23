@@ -1,14 +1,12 @@
 'use client';
-// components/TabRutina.jsx — v2 (bugs corregidos)
-// Cambios vs v1:
-//   1. Paleta C importada desde lib/colores (no duplicada)
-//   2. sumarPuntosRutina ya NO hace getDoc — usa ptsActuales de la prop (evita lectura extra y race condition)
-//   3. handleMarcarUso envuelto en useCallback para evitar stale closure con uid/rutina
-//   4. handleGuardarProducto también en useCallback
-//   5. Guard: si uid es undefined/null, no se intenta nada en Firebase
-//   6. mounted.current check agregado en cargarDatos para evitar setState en componente desmontado
-//   7. calcularRacha movida fuera del componente (ya estaba bien, se mantiene)
-//   8. Cleanup correcto del useEffect de uid
+// components/TabRutina.jsx — v3 (barcode scanner + Shopify Storefront API)
+// Cambios vs v2:
+//   1. ModalProducto ahora incluye escaneo de código de barras con BarcodeDetector API
+//   2. Búsqueda de producto en Shopify Storefront API por barcode
+//   3. Preview del producto encontrado (imagen, nombre, precio) antes de confirmar
+//   4. Se guarda shopify_variant_id, shopify_product_url, shopify_image junto al paso
+//   5. Botón "Reponer mismo →" usa variant_id para agregar directo al carro de moonbow.cl
+//   6. Fallback al catálogo general si no hay variant_id guardado
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { db } from '@/lib/firebase';
@@ -16,7 +14,12 @@ import {
   doc, getDoc, setDoc, updateDoc, serverTimestamp,
   collection, addDoc,
 } from 'firebase/firestore';
-import { C } from '@/lib/colores'; // FIX 1: importar paleta compartida
+import { C } from '@/lib/colores';
+
+// ─── Shopify config ───────────────────────────────────────────────────────────
+// La búsqueda por barcode se hace via API Route del servidor (/api/shopify-barcode)
+// para que el Admin token nunca quede expuesto en el cliente.
+// El Storefront token solo se usa para el botón de carro (URL directa).
 
 // ─── Pasos de rutina con config por defecto ───────────────────────────────────
 const PASOS_CONFIG = [
@@ -30,8 +33,8 @@ const PASOS_CONFIG = [
   { id: 'spf',        label: 'SPF',        emoji: '☀️', dias_promedio: 30, orden: 8 },
 ];
 
-const ALERTA_DIAS      = 7;
-const PTS_DIA_COMPLETO = 0.2;
+const ALERTA_DIAS       = 7;
+const PTS_DIA_COMPLETO  = 0.2;
 const PTS_BONUS_SEMANAL = 2;
 const DIAS_BONUS        = 5;
 
@@ -64,7 +67,6 @@ function colorBarra(pct) {
   return C.green;
 }
 
-// ─── Calcular racha de días consecutivos ─────────────────────────────────────
 function calcularRacha(historial) {
   let racha = 0;
   const hoyD = new Date();
@@ -93,14 +95,13 @@ async function guardarRutina(uid, data) {
   await setDoc(ref, data, { merge: true });
 }
 
-// FIX 2: recibe ptsActuales como parámetro — ya NO hace getDoc del usuario
 async function sumarPuntosRutina(uid, ptsActuales, puntos, motivo, descripcion) {
   const nuevoSaldo = parseFloat((ptsActuales + puntos).toFixed(2));
 
   const userRef = doc(db, 'usuarios', uid);
   await updateDoc(userRef, {
     'lealtad.puntos':                  nuevoSaldo,
-    'lealtad.puntos_acumulados_total': nuevoSaldo, // se suma al acumulado también
+    'lealtad.puntos_acumulados_total': nuevoSaldo,
     'metadata.ultima_interaccion':     serverTimestamp(),
   });
 
@@ -121,12 +122,262 @@ async function sumarPuntosRutina(uid, ptsActuales, puntos, motivo, descripcion) 
   return nuevoSaldo;
 }
 
+// ─── Buscar producto por barcode via API Route (Admin API en servidor) ────────
+// El barcode se manda al endpoint propio → el servidor consulta Shopify Admin API
+// → devuelve el producto. El Admin token nunca toca el cliente.
+async function buscarProductoPorBarcode(barcode) {
+  const res = await fetch(`/api/shopify-barcode?barcode=${encodeURIComponent(barcode)}`, {
+    method: 'GET',
+    headers: { 'Content-Type': 'application/json' },
+  });
+
+  if (!res.ok) {
+    throw new Error(`Error del servidor: ${res.status}`);
+  }
+
+  const json = await res.json();
+  return json.producto || null; // null si no se encontró
+}
+
+// ─── Modal: escaneo de código de barras ──────────────────────────────────────
+function ModalEscaneo({ onProductoEncontrado, onCerrar }) {
+  const videoRef   = useRef(null);
+  const streamRef  = useRef(null);
+  const detectorRef = useRef(null);
+  const rafRef     = useRef(null);
+
+  const [estado,   setEstado]   = useState('iniciando'); // iniciando | escaneando | buscando | error
+  const [errorMsg, setErrorMsg] = useState('');
+
+  useEffect(() => {
+    async function iniciarCamara() {
+      try {
+        // Verificar soporte de BarcodeDetector
+        if (!('BarcodeDetector' in window)) {
+          setEstado('error');
+          setErrorMsg('Tu navegador no soporta el escáner de códigos. Ingresa el nombre manualmente.');
+          return;
+        }
+
+        detectorRef.current = new window.BarcodeDetector({
+          formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'code_39', 'qr_code'],
+        });
+
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
+        });
+
+        streamRef.current = stream;
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          await videoRef.current.play();
+        }
+
+        setEstado('escaneando');
+        escanearLoop();
+      } catch (e) {
+        setEstado('error');
+        setErrorMsg('No se pudo acceder a la cámara. Verifica los permisos.');
+      }
+    }
+
+    iniciarCamara();
+
+    return () => {
+      // Cleanup: detener cámara y loop
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
+    };
+  }, []);
+
+  async function escanearLoop() {
+    if (!videoRef.current || !detectorRef.current) return;
+    try {
+      const barcodes = await detectorRef.current.detect(videoRef.current);
+      if (barcodes.length > 0) {
+        const rawValue = barcodes[0].rawValue;
+        setEstado('buscando');
+        if (rafRef.current) cancelAnimationFrame(rafRef.current);
+        // Detener cámara al detectar
+        if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
+
+        try {
+          const producto = await buscarProductoPorBarcode(rawValue);
+          if (producto) {
+            onProductoEncontrado(producto);
+          } else {
+            setEstado('error');
+            setErrorMsg(`Código ${rawValue} no encontrado en Moonbow. Ingresa el nombre manualmente.`);
+          }
+        } catch (e) {
+          setEstado('error');
+          setErrorMsg('Error al buscar el producto. Verifica tu conexión.');
+        }
+        return;
+      }
+    } catch (e) {
+      // Error de detección puntual, seguir escaneando
+    }
+    rafRef.current = requestAnimationFrame(escanearLoop);
+  }
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(10,5,12,0.92)', backdropFilter: 'blur(16px)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', zIndex: 600 }}>
+
+      {/* Header */}
+      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, padding: '20px 22px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div style={{ fontSize: 15, fontWeight: 700, color: '#fff' }}>📷 Escanear código</div>
+        <button onClick={onCerrar} style={{ background: 'rgba(255,255,255,0.12)', border: 'none', color: '#fff', borderRadius: 10, padding: '8px 14px', fontSize: 13, cursor: 'pointer', fontFamily: 'inherit' }}>
+          Cancelar
+        </button>
+      </div>
+
+      {/* Video / Estado */}
+      {(estado === 'iniciando' || estado === 'escaneando') && (
+        <div style={{ position: 'relative', width: '85vw', maxWidth: 340, aspectRatio: '1/1', borderRadius: 24, overflow: 'hidden', border: '2px solid rgba(242,168,184,0.5)' }}>
+          <video
+            ref={videoRef}
+            muted
+            playsInline
+            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+          />
+          {/* Visor tipo scanner */}
+          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <div style={{ width: '70%', height: '30%', border: '2px solid rgba(242,168,184,0.9)', borderRadius: 8, position: 'relative' }}>
+              {/* Esquinas */}
+              {[['top','left'],['top','right'],['bottom','left'],['bottom','right']].map(([v,h]) => (
+                <div key={`${v}${h}`} style={{
+                  position: 'absolute',
+                  [v]: -2, [h]: -2,
+                  width: 16, height: 16,
+                  borderTop:    v === 'top'    ? '3px solid #F2A8B8' : 'none',
+                  borderBottom: v === 'bottom' ? '3px solid #F2A8B8' : 'none',
+                  borderLeft:   h === 'left'   ? '3px solid #F2A8B8' : 'none',
+                  borderRight:  h === 'right'  ? '3px solid #F2A8B8' : 'none',
+                }} />
+              ))}
+              {/* Línea de scan animada */}
+              <div style={{
+                position: 'absolute', left: 0, right: 0, height: 2,
+                background: 'linear-gradient(90deg, transparent, #F2A8B8, transparent)',
+                animation: 'scanLine 1.8s ease-in-out infinite',
+              }} />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {estado === 'buscando' && (
+        <div style={{ textAlign: 'center', color: '#fff' }}>
+          <div style={{ fontSize: 48, marginBottom: 16, animation: 'spin 1.2s linear infinite' }}>✦</div>
+          <div style={{ fontSize: 15, fontWeight: 600 }}>Buscando en Moonbow...</div>
+        </div>
+      )}
+
+      {estado === 'error' && (
+        <div style={{ background: 'rgba(255,255,255,0.08)', borderRadius: 20, padding: '28px 24px', maxWidth: 300, textAlign: 'center' }}>
+          <div style={{ fontSize: 40, marginBottom: 14 }}>😕</div>
+          <div style={{ fontSize: 14, color: '#fff', lineHeight: 1.6, marginBottom: 20 }}>{errorMsg}</div>
+          <button onClick={onCerrar} style={{ background: `linear-gradient(135deg,${C.rose},${C.roseDark})`, color: '#fff', border: 'none', borderRadius: 12, padding: '12px 24px', fontSize: 14, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
+            Ingresar manualmente
+          </button>
+        </div>
+      )}
+
+      {estado === 'escaneando' && (
+        <div style={{ marginTop: 24, fontSize: 13, color: 'rgba(255,255,255,0.6)', textAlign: 'center' }}>
+          Apunta al código de barras del producto
+        </div>
+      )}
+
+      <style>{`
+        @keyframes scanLine {
+          0%   { top: 0%; }
+          50%  { top: calc(100% - 2px); }
+          100% { top: 0%; }
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+      `}</style>
+    </div>
+  );
+}
+
+// ─── Modal: preview de producto encontrado en Shopify ─────────────────────────
+function ModalPreviewProducto({ producto, onConfirmar, onRechazar }) {
+  const precio = producto.price
+    ? new Intl.NumberFormat('es-CL', { style: 'currency', currency: producto.currency || 'CLP', minimumFractionDigits: 0 }).format(producto.price)
+    : null;
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(45,27,46,0.7)', backdropFilter: 'blur(14px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 650, padding: '0 20px' }}>
+      <div style={{ background: C.white, borderRadius: 28, padding: '28px 22px', width: '100%', maxWidth: 360, boxShadow: '0 24px 64px rgba(45,27,46,.25)' }}>
+
+        <div style={{ fontSize: 13, color: C.textSoft, fontWeight: 600, marginBottom: 16, textAlign: 'center' }}>
+          ✓ Producto encontrado
+        </div>
+
+        {/* Imagen */}
+        {producto.image && (
+          <div style={{ width: 100, height: 100, borderRadius: 18, overflow: 'hidden', margin: '0 auto 16px', border: `1px solid ${C.border}` }}>
+            <img src={producto.image} alt={producto.title} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+          </div>
+        )}
+
+        <div style={{ textAlign: 'center', marginBottom: 20 }}>
+          <div style={{ fontSize: 16, fontWeight: 700, color: C.text, lineHeight: 1.3, marginBottom: 6 }}>{producto.title}</div>
+          {precio && (
+            <div style={{ fontSize: 15, fontWeight: 800, color: C.roseDark }}>{precio}</div>
+          )}
+          <div style={{ fontSize: 11, color: C.textSoft, marginTop: 4 }}>moonbow.cl</div>
+        </div>
+
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button
+            onClick={onRechazar}
+            style={{ flex: 1, background: `${C.border}50`, border: 'none', borderRadius: 12, padding: '12px 0', fontSize: 13, fontWeight: 600, color: C.textMid, cursor: 'pointer', fontFamily: 'inherit' }}>
+            No es este
+          </button>
+          <button
+            onClick={() => onConfirmar(producto)}
+            style={{ flex: 2, background: `linear-gradient(135deg,${C.rose},${C.roseDark})`, color: '#fff', border: 'none', borderRadius: 12, padding: '12px 0', fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
+            ✓ Confirmar
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Modal: asignar producto a un paso ────────────────────────────────────────
 function ModalProducto({ paso, stepData, onGuardar, onCerrar }) {
-  const [nombre,    setNombre]    = useState(stepData?.product_name          || '');
-  const [ml,        setMl]        = useState(stepData?.product_ml            || '');
-  const [dias,      setDias]      = useState(stepData?.estimated_days_total  || paso.dias_promedio);
-  const [guardando, setGuardando] = useState(false);
+  const [nombre,       setNombre]       = useState(stepData?.product_name         || '');
+  const [ml,           setMl]           = useState(stepData?.product_ml           || '');
+  const [dias,         setDias]         = useState(stepData?.estimated_days_total || paso.dias_promedio);
+  const [guardando,    setGuardando]    = useState(false);
+  const [escaneando,   setEscaneando]   = useState(false);
+  const [productoShopify, setProductoShopify] = useState(null); // producto encontrado pendiente de confirmar
+
+  // Si ya hay datos de Shopify guardados, mostrarlos
+  const [shopifyInfo, setShopifyInfo] = useState(
+    stepData?.shopify_variant_id
+      ? { variantId: stepData.shopify_variant_id, productUrl: stepData.shopify_product_url, image: stepData.shopify_image }
+      : null
+  );
+
+  function handleProductoEncontrado(producto) {
+    setEscaneando(false);
+    setProductoShopify(producto);
+  }
+
+  function handleConfirmarProducto(producto) {
+    setNombre(producto.title);
+    setShopifyInfo({
+      variantId:  producto.variantId,
+      productUrl: producto.productUrl,
+      image:      producto.image,
+    });
+    setProductoShopify(null);
+  }
 
   async function handleGuardar(e) {
     e.preventDefault();
@@ -138,59 +389,122 @@ function ModalProducto({ paso, stepData, onGuardar, onCerrar }) {
       estimated_days_total: parseInt(dias) || paso.dias_promedio,
       start_date:           stepData?.start_date || hoy(),
       uses_count:           stepData?.uses_count || 0,
+      // Datos Shopify (null si no se escaneó)
+      shopify_variant_id:   shopifyInfo?.variantId  || null,
+      shopify_product_url:  shopifyInfo?.productUrl || null,
+      shopify_image:        shopifyInfo?.image       || null,
     });
     setGuardando(false);
     onCerrar();
   }
 
   return (
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(45,27,46,0.55)', backdropFilter: 'blur(12px)', display: 'flex', alignItems: 'flex-end', zIndex: 400 }} onClick={onCerrar}>
-      <div style={{ background: C.white, borderRadius: '28px 28px 0 0', padding: '10px 22px 48px', width: '100%', maxWidth: 430, margin: '0 auto', boxShadow: '0 -8px 40px rgba(45,27,46,.14)' }} onClick={e => e.stopPropagation()}>
-        <div style={{ width: 36, height: 4, background: C.border, borderRadius: 99, margin: '0 auto 20px' }} />
+    <>
+      <div style={{ position: 'fixed', inset: 0, background: 'rgba(45,27,46,0.55)', backdropFilter: 'blur(12px)', display: 'flex', alignItems: 'flex-end', zIndex: 400 }} onClick={onCerrar}>
+        <div style={{ background: C.white, borderRadius: '28px 28px 0 0', padding: '10px 22px 48px', width: '100%', maxWidth: 430, margin: '0 auto', boxShadow: '0 -8px 40px rgba(45,27,46,.14)' }} onClick={e => e.stopPropagation()}>
+          <div style={{ width: 36, height: 4, background: C.border, borderRadius: 99, margin: '0 auto 20px' }} />
 
-        <h3 style={{ fontSize: 18, fontWeight: 700, color: C.text, margin: '0 0 4px' }}>
-          {paso.emoji} {paso.label}
-        </h3>
-        <p style={{ fontSize: 13, color: C.textSoft, margin: '0 0 20px' }}>
-          {stepData ? 'Editar producto asignado' : 'Asigna un producto a este paso'}
-        </p>
+          <h3 style={{ fontSize: 18, fontWeight: 700, color: C.text, margin: '0 0 4px' }}>
+            {paso.emoji} {paso.label}
+          </h3>
+          <p style={{ fontSize: 13, color: C.textSoft, margin: '0 0 20px' }}>
+            {stepData ? 'Editar producto asignado' : 'Asigna un producto a este paso'}
+          </p>
 
-        <form onSubmit={handleGuardar}>
-          <label style={sty.label}>Nombre del producto</label>
-          <input
-            style={sty.input}
-            type="text"
-            placeholder="Ej: Centella Ampoule"
-            value={nombre}
-            onChange={e => setNombre(e.target.value)}
-            required
-            autoFocus
-          />
-
-          <div style={{ display: 'flex', gap: 10 }}>
-            <div style={{ flex: 1 }}>
-              <label style={sty.label}>Volumen (ml) <span style={{ color: C.textSoft }}>opcional</span></label>
-              <input style={sty.input} type="number" placeholder="50" value={ml} onChange={e => setMl(e.target.value)} min="1" />
+          {/* Botón escanear código de barras */}
+          <button
+            type="button"
+            onClick={() => setEscaneando(true)}
+            style={{
+              width: '100%',
+              background: shopifyInfo
+                ? `${C.green}15`
+                : `linear-gradient(135deg,${C.lavender}20,${C.rose}10)`,
+              border: `1.5px dashed ${shopifyInfo ? C.green : C.lavender}`,
+              borderRadius: 14,
+              padding: '13px 16px',
+              marginBottom: 16,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 12,
+              cursor: 'pointer',
+              fontFamily: 'inherit',
+            }}>
+            {shopifyInfo?.image && (
+              <img src={shopifyInfo.image} alt="" style={{ width: 36, height: 36, borderRadius: 8, objectFit: 'cover', flexShrink: 0 }} />
+            )}
+            {!shopifyInfo?.image && (
+              <div style={{ fontSize: 24, flexShrink: 0 }}>📷</div>
+            )}
+            <div style={{ textAlign: 'left', flex: 1 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: shopifyInfo ? C.green : C.textMid }}>
+                {shopifyInfo ? '✓ Producto vinculado a Moonbow' : 'Escanear código de barras'}
+              </div>
+              <div style={{ fontSize: 11, color: C.textSoft }}>
+                {shopifyInfo
+                  ? 'Toca para volver a escanear'
+                  : 'Activa la cámara para identificar el producto'}
+              </div>
             </div>
-            <div style={{ flex: 1 }}>
-              <label style={sty.label}>Días estimados</label>
-              <input style={sty.input} type="number" placeholder={paso.dias_promedio} value={dias} onChange={e => setDias(e.target.value)} min="7" required />
-            </div>
-          </div>
-
-          <div style={{ background: `${C.lavender}20`, borderRadius: 12, padding: '10px 14px', marginBottom: 16, fontSize: 12, color: C.textMid }}>
-            💡 Cada vez que marques "usado hoy" se descuenta un día. El promedio para {paso.label.toLowerCase()} es ~{paso.dias_promedio} días.
-          </div>
-
-          <button type="submit" disabled={guardando}
-            style={{ width: '100%', background: `linear-gradient(135deg,${C.rose},${C.roseDark})`, color: '#fff', border: 'none', borderRadius: 14, padding: 14, fontSize: 14, fontWeight: 700, cursor: 'pointer', opacity: guardando ? 0.7 : 1, fontFamily: 'inherit' }}>
-            {guardando ? 'Guardando...' : '✓ Guardar'}
+            {shopifyInfo && (
+              <div style={{ fontSize: 18 }}>🔗</div>
+            )}
           </button>
-        </form>
 
-        <button onClick={onCerrar} style={sty.btnCerrar}>Cancelar</button>
+          <form onSubmit={handleGuardar}>
+            <label style={sty.label}>Nombre del producto</label>
+            <input
+              style={sty.input}
+              type="text"
+              placeholder="Ej: Centella Ampoule"
+              value={nombre}
+              onChange={e => setNombre(e.target.value)}
+              required
+              autoFocus={!shopifyInfo}
+            />
+
+            <div style={{ display: 'flex', gap: 10 }}>
+              <div style={{ flex: 1 }}>
+                <label style={sty.label}>Volumen (ml) <span style={{ color: C.textSoft }}>opcional</span></label>
+                <input style={sty.input} type="number" placeholder="50" value={ml} onChange={e => setMl(e.target.value)} min="1" />
+              </div>
+              <div style={{ flex: 1 }}>
+                <label style={sty.label}>Días estimados</label>
+                <input style={sty.input} type="number" placeholder={paso.dias_promedio} value={dias} onChange={e => setDias(e.target.value)} min="7" required />
+              </div>
+            </div>
+
+            <div style={{ background: `${C.lavender}20`, borderRadius: 12, padding: '10px 14px', marginBottom: 16, fontSize: 12, color: C.textMid }}>
+              💡 Cada vez que marques "usado hoy" se descuenta un día. El promedio para {paso.label.toLowerCase()} es ~{paso.dias_promedio} días.
+            </div>
+
+            <button type="submit" disabled={guardando}
+              style={{ width: '100%', background: `linear-gradient(135deg,${C.rose},${C.roseDark})`, color: '#fff', border: 'none', borderRadius: 14, padding: 14, fontSize: 14, fontWeight: 700, cursor: 'pointer', opacity: guardando ? 0.7 : 1, fontFamily: 'inherit' }}>
+              {guardando ? 'Guardando...' : '✓ Guardar'}
+            </button>
+          </form>
+
+          <button onClick={onCerrar} style={sty.btnCerrar}>Cancelar</button>
+        </div>
       </div>
-    </div>
+
+      {/* Modal cámara */}
+      {escaneando && (
+        <ModalEscaneo
+          onProductoEncontrado={handleProductoEncontrado}
+          onCerrar={() => setEscaneando(false)}
+        />
+      )}
+
+      {/* Modal preview producto Shopify */}
+      {productoShopify && (
+        <ModalPreviewProducto
+          producto={productoShopify}
+          onConfirmar={handleConfirmarProducto}
+          onRechazar={() => { setProductoShopify(null); setEscaneando(true); }}
+        />
+      )}
+    </>
   );
 }
 
@@ -220,6 +534,14 @@ function TarjetaPaso({ paso, stepData, usadoHoy, onMarcarUso, onEditar, cargando
   const alerta  = dias !== null && dias <= ALERTA_DIAS;
   const agotado = dias !== null && dias <= 0;
 
+  function handleReponer() {
+    if (stepData?.shopify_variant_id) {
+      window.open(`https://moonbow.cl/cart/add?id=${stepData.shopify_variant_id}&quantity=1`, '_blank');
+    } else {
+      window.open('https://moonbow.cl/collections/all', '_blank');
+    }
+  }
+
   return (
     <div style={{
       background: usadoHoy
@@ -241,7 +563,14 @@ function TarjetaPaso({ paso, stepData, usadoHoy, onMarcarUso, onEditar, cargando
       )}
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <div style={{ fontSize: 22, lineHeight: 1 }}>{paso.emoji}</div>
+        {/* Imagen Shopify si existe, si no el emoji */}
+        {stepData?.shopify_image ? (
+          <div style={{ width: 32, height: 32, borderRadius: 8, overflow: 'hidden', flexShrink: 0, border: `1px solid ${C.border}` }}>
+            <img src={stepData.shopify_image} alt={stepData.product_name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+          </div>
+        ) : (
+          <div style={{ fontSize: 22, lineHeight: 1 }}>{paso.emoji}</div>
+        )}
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 13, fontWeight: 700, color: C.text }}>{paso.label}</div>
           {stepData?.product_name && (
@@ -312,7 +641,7 @@ function TarjetaPaso({ paso, stepData, usadoHoy, onMarcarUso, onEditar, cargando
           ⚠️ Te quedan ~{dias} días de {paso.label.toLowerCase()}
           <div style={{ marginTop: 4 }}>
             <button
-              onClick={() => window.open('https://moonbow.cl/collections/all', '_blank')}
+              onClick={handleReponer}
               style={{ background: C.urgent, color: '#fff', border: 'none', borderRadius: 7, padding: '4px 10px', fontSize: 10, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
               Reponer ahora →
             </button>
@@ -338,7 +667,6 @@ export default function TabRutina({ uid, ptsActuales, onPuntosActualizados }) {
     return () => { mounted.current = false; };
   }, []);
 
-  // FIX 5+6: guard uid null, cleanup correcto
   useEffect(() => {
     if (!uid) {
       setCargando(false);
@@ -376,14 +704,12 @@ export default function TabRutina({ uid, ptsActuales, onPuntosActualizados }) {
     return d !== null && d <= ALERTA_DIAS;
   });
 
-  // FIX 3: useCallback evita stale closure — depende de uid, rutina, ptsActuales
   const handleMarcarUso = useCallback(async (pasoId) => {
     if (!uid) return;
     if (usadosHoy.includes(pasoId)) return;
 
     const paso = PASOS_CONFIG.find(p => p.id === pasoId);
 
-    // Si no tiene producto asignado → abrir modal
     if (!steps[pasoId]) {
       setModalPaso(paso);
       return;
@@ -396,17 +722,16 @@ export default function TabRutina({ uid, ptsActuales, onPuntosActualizados }) {
       const nuevoUses      = (steps[pasoId]?.uses_count || 0) + 1;
       const nuevaHistorial = { ...(rutina?.historial_dias || {}), [hoyStr]: nuevoUsadosHoy };
 
-      // Optimistic update
       setRutina(prev => ({
         ...prev,
         steps: { ...prev.steps, [pasoId]: { ...prev.steps[pasoId], uses_count: nuevoUses } },
         historial_dias: nuevaHistorial,
       }));
 
-      const esCompletado     = nuevoUsadosHoy.length === totalPasos;
-      const semanaClave      = semanaActual();
-      const mismasSemana     = (rutina?.semana_actual || semanaClave) === semanaClave;
-      const diasSemanaNew    = mismasSemana ? (rutina?.dias_semana || 0) : 0;
+      const esCompletado      = nuevoUsadosHoy.length === totalPasos;
+      const semanaClave       = semanaActual();
+      const mismasSemana      = (rutina?.semana_actual || semanaClave) === semanaClave;
+      const diasSemanaNew     = mismasSemana ? (rutina?.dias_semana || 0) : 0;
       const primerDiaCompleto = esCompletado && !(rutina?.dias_completos_semana || []).includes(hoyStr);
       const diasSemanaFinal   = primerDiaCompleto ? diasSemanaNew + 1 : diasSemanaNew;
 
@@ -425,7 +750,6 @@ export default function TabRutina({ uid, ptsActuales, onPuntosActualizados }) {
       };
       await guardarRutina(uid, nuevaRutina);
 
-      // FIX 2: sumarPuntosRutina usa ptsActuales de la prop, no hace getDoc
       if (primerDiaCompleto) {
         const ptsSaldo = typeof ptsActuales === 'number' ? ptsActuales : 0;
         const nuevoSaldo = await sumarPuntosRutina(uid, ptsSaldo, PTS_DIA_COMPLETO, 'rutina_diaria', 'Rutina diaria completada ✨');
@@ -434,7 +758,6 @@ export default function TabRutina({ uid, ptsActuales, onPuntosActualizados }) {
           if (onPuntosActualizados) onPuntosActualizados(nuevoSaldo);
         }
 
-        // ¿Bonus semanal?
         if (diasSemanaFinal >= DIAS_BONUS && !rutina?.bonus_semanal_cobrado?.[semanaClave]) {
           const nuevoSaldo2 = await sumarPuntosRutina(uid, nuevoSaldo, PTS_BONUS_SEMANAL, 'bonus_semanal_rutina', `Bonus semanal: ${diasSemanaFinal} días de rutina`);
           await guardarRutina(uid, { bonus_semanal_cobrado: { ...(rutina?.bonus_semanal_cobrado || {}), [semanaClave]: true } });
@@ -454,7 +777,6 @@ export default function TabRutina({ uid, ptsActuales, onPuntosActualizados }) {
     }
   }, [uid, rutina, usadosHoy, steps, hoyStr, ptsActuales, onPuntosActualizados, totalPasos]);
 
-  // FIX 4: useCallback en guardarProducto
   const handleGuardarProducto = useCallback(async (producto) => {
     if (!modalPaso || !uid) return;
     const pasoId = modalPaso.id;
@@ -480,7 +802,6 @@ export default function TabRutina({ uid, ptsActuales, onPuntosActualizados }) {
     );
   }
 
-  // FIX 5: si no hay uid, mostrar mensaje claro en vez de crashear
   if (!uid) {
     return (
       <div style={{ textAlign: 'center', padding: '48px 20px', color: C.textSoft, fontSize: 13 }}>
@@ -629,13 +950,25 @@ export default function TabRutina({ uid, ptsActuales, onPuntosActualizados }) {
                 const s   = steps[paso.id];
                 const d   = diasRestantes(s);
                 const pct = porcentajeUso(s);
+                const tieneVariant = !!s?.shopify_variant_id;
+
                 return (
                   <div key={paso.id} style={{ background: C.white, borderRadius: 18, padding: '16px', marginBottom: 10, border: `1.5px solid ${d <= 3 ? C.urgent + '60' : C.gold + '60'}` }}>
                     <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 10 }}>
-                      <div style={{ fontSize: 24 }}>{paso.emoji}</div>
+                      {/* Imagen del producto si existe */}
+                      {s?.shopify_image ? (
+                        <div style={{ width: 40, height: 40, borderRadius: 10, overflow: 'hidden', flexShrink: 0, border: `1px solid ${C.border}` }}>
+                          <img src={s.shopify_image} alt={s.product_name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                        </div>
+                      ) : (
+                        <div style={{ fontSize: 28 }}>{paso.emoji}</div>
+                      )}
                       <div>
                         <div style={{ fontSize: 13, fontWeight: 700, color: C.text }}>{paso.label}</div>
                         <div style={{ fontSize: 11, color: C.textSoft }}>{s?.product_name || '—'}</div>
+                        {tieneVariant && (
+                          <div style={{ fontSize: 10, color: C.green, fontWeight: 600, marginTop: 2 }}>🔗 Vinculado a Moonbow</div>
+                        )}
                       </div>
                       <div style={{ marginLeft: 'auto', textAlign: 'right' }}>
                         <div style={{ fontSize: 15, fontWeight: 800, color: d <= 3 ? C.urgent : C.gold }}>~{d} días</div>
@@ -649,9 +982,15 @@ export default function TabRutina({ uid, ptsActuales, onPuntosActualizados }) {
 
                     <div style={{ display: 'flex', gap: 8 }}>
                       <button
-                        onClick={() => window.open('https://moonbow.cl/collections/all', '_blank')}
+                        onClick={() => {
+                          if (tieneVariant) {
+                            window.open(`https://moonbow.cl/cart/add?id=${s.shopify_variant_id}&quantity=1`, '_blank');
+                          } else {
+                            window.open('https://moonbow.cl/collections/all', '_blank');
+                          }
+                        }}
                         style={{ flex: 2, background: `linear-gradient(135deg,${C.rose},${C.roseDark})`, color: '#fff', border: 'none', borderRadius: 12, padding: '10px 0', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
-                        Reponer mismo →
+                        {tieneVariant ? '🛒 Agregar al carro →' : 'Reponer mismo →'}
                       </button>
                       <button
                         onClick={() => window.open('https://moonbow.cl/collections/all', '_blank')}
