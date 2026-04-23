@@ -18,7 +18,7 @@ import {
   NIVELES, TOTAL_SELLOS, REGLA_COMPRA,
 } from '../lib/puntos';
 import { C } from '@/lib/colores'; // FIX 1: importar paleta compartida
-import TabRutina from './TabRutina';
+import TabRutina from './TabRutina'; // integración pestaña rutina
 
 const TIER_COLORS = {
   bronze: { from: '#F2C4A0', to: '#E89878' },
@@ -977,14 +977,32 @@ export default function TarjetaFidelizacion({ uid, onLogout }) {
               })}
             </div>
           )}
+
+          {/* RUTINA */}
+          {vista === 'rutina' && (
+            <TabRutina
+              uid={uid}
+              ptsActuales={pts}
+              onPuntosActualizados={(nuevoPts) => {
+                setUsuario(prev => ({
+                  ...prev,
+                  lealtad: {
+                    ...prev.lealtad,
+                    puntos: nuevoPts,
+                  },
+                }));
+              }}
+            />
+          )}
         </div>
 
         {/* Nav fijo */}
         <div style={{ position: 'fixed', bottom: 0, left: '50%', transform: 'translateX(-50%)', width: '100%', maxWidth: 430, background: 'rgba(253,248,245,.95)', backdropFilter: 'blur(20px)', borderTop: `1px solid ${C.border}`, display: 'flex', padding: '10px 0 20px', zIndex: 100 }}>
           {[
-            { id: 'tarjeta',   icon: '◈', label: 'Tarjeta'   },
-            { id: 'ganar',     icon: '✦', label: 'Ganar'     },
-            { id: 'historial', icon: '◎', label: 'Historial' },
+            { id: 'tarjeta',   icon: '◈',  label: 'Tarjeta'  },
+            { id: 'rutina',    icon: '🌸', label: 'Rutina'   },
+            { id: 'ganar',     icon: '✦',  label: 'Ganar'    },
+            { id: 'historial', icon: '◎',  label: 'Historial'},
             { id: 'canjear',   icon: '🎁', label: 'Canjear'  },
           ].map(item => (
             <button key={item.id} onClick={() => setVista(item.id)}
