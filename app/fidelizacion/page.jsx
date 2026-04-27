@@ -4,23 +4,26 @@
 import { useState, useEffect } from 'react';
 import { auth, db } from '@/lib/firebase';
 import { GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut } from 'firebase/auth';
-import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, setDoc, serverTimestamp, addDoc, collection } from 'firebase/firestore';
 import { getUsuario } from '@/lib/puntos';
 import TarjetaFidelizacion from '@/components/TarjetaFidelizacion';
 
-export default function FidelizacionPage() {
-  const [authUser, setAuthUser]   = useState(undefined); // undefined = cargando
-  const [dbUser, setDbUser]       = useState(undefined);
-  const [nombre, setNombre]       = useState('');
-  const [guardando, setGuardando] = useState(false);
+const PTS_BIENVENIDA = 1; // puntos reales que se otorgan al registrarse
 
-  // Escuchar auth
+export default function FidelizacionPage() {
+  const [authUser, setAuthUser]   = useState(undefined);
+  const [dbUser,   setDbUser]     = useState(undefined);
+  const [nombre,   setNombre]     = useState('');
+  const [cumple,   setCumple]     = useState('');   // DD/MM
+  const [guardando, setGuardando] = useState(false);
+  const [cumpleError, setCumpleError] = useState('');
+
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (user) => {
       setAuthUser(user);
       if (user) {
         const data = await getUsuario(user.uid);
-        setDbUser(data); // null si no existe en Firestore
+        setDbUser(data);
       } else {
         setDbUser(undefined);
       }
@@ -37,62 +40,85 @@ export default function FidelizacionPage() {
     }
   }
 
+  // Formatear cumpleaños: auto-inserta "/" después de los dos primeros dígitos
+  function handleCumpleChange(e) {
+    setCumpleError('');
+    let v = e.target.value.replace(/[^0-9/]/g, '');
+    if (v.length === 2 && !v.includes('/') && cumple.length < 2) v = v + '/';
+    if (v.length > 5) return;
+    setCumple(v);
+  }
+
+  function validarCumple(val) {
+    if (!val) return true; // es opcional
+    if (val.length !== 5 || !val.includes('/')) return false;
+    const [dd, mm] = val.split('/').map(Number);
+    if (mm < 1 || mm > 12) return false;
+    if (dd < 1 || dd > 31) return false;
+    return true;
+  }
+
   async function handleRegistro(e) {
     e.preventDefault();
     if (!nombre.trim()) return;
-    setGuardando(true);
 
+    if (cumple && !validarCumple(cumple)) {
+      setCumpleError('Formato inválido — usa DD/MM, ej: 15/03');
+      return;
+    }
+
+    setGuardando(true);
     try {
-      // Buscar referido en URL si viene de un link
       const params = new URLSearchParams(window.location.search);
       const refUid = params.get('ref');
 
+      const perfil = {
+        nombre: nombre.trim(),
+        email:  authUser.email,
+      };
+      if (cumple) perfil.fecha_nacimiento = cumple;
+
       await setDoc(doc(db, 'usuarios', authUser.uid), {
-        perfil: {
-          nombre: nombre.trim(),
-          email:  authUser.email,
-        },
+        perfil,
         lealtad: {
-          puntos:                 1,
-          puntos_acumulados_total: 1,
-          tier:                   'bronze',
+          puntos:                  PTS_BIENVENIDA,
+          puntos_acumulados_total: PTS_BIENVENIDA,
+          tier:                    'bronze',
         },
         metadata: {
-          created_at:        serverTimestamp(),
+          created_at:         serverTimestamp(),
           ultima_interaccion: serverTimestamp(),
-          total_purchases:   0,
+          total_purchases:    0,
           last_purchase_date: null,
-          canal_registro:    'web',
-          referido_por:      refUid || null,
+          canal_registro:     'web',
+          referido_por:       refUid || null,
         },
       });
 
-      // Registrar transacción de bienvenida
-      const { addDoc, collection } = await import('firebase/firestore');
+      // Transacción de bienvenida
       await addDoc(collection(db, 'usuarios', authUser.uid, 'transacciones_lealtad'), {
         tipo:             'earn',
         motivo:           'bienvenida',
-        puntos:           1,
-        saldo_resultante: 1,
+        puntos:           PTS_BIENVENIDA,
+        saldo_resultante: PTS_BIENVENIDA,
         timestamp:        serverTimestamp(),
         metadata: {
-          descripcion:  'Puntos de bienvenida',
+          descripcion:  'Punto de bienvenida 🌸',
           aprobado_por: 'sistema',
           monto:        null,
           orden_id:     null,
         },
       });
 
-      // Si vino referido, sumar puntos al referidor
+      // Puntos al referidor
       if (refUid) {
         const { agregarPuntos } = await import('@/lib/puntos');
         await agregarPuntos(refUid, 'referido', {
-          descripcion: `Referido: ${nombre.trim()}`,
+          descripcion:  `Referido: ${nombre.trim()}`,
           aprobado_por: 'sistema',
         });
       }
 
-      // Recargar datos
       const data = await getUsuario(authUser.uid);
       setDbUser(data);
     } catch (err) {
@@ -104,12 +130,8 @@ export default function FidelizacionPage() {
 
   // ── Estados de UI ──────────────────────────────────────────────────────────
 
-  // Cargando auth
-  if (authUser === undefined) {
-    return <Pantalla><Spinner /></Pantalla>;
-  }
+  if (authUser === undefined) return <Pantalla><Spinner /></Pantalla>;
 
-  // No autenticado → Login
   if (!authUser) {
     return (
       <div style={estilos.loginContenedor}>
@@ -128,12 +150,9 @@ export default function FidelizacionPage() {
     );
   }
 
-  // Autenticado pero cargando datos de Firestore
-  if (dbUser === undefined) {
-    return <Pantalla><Spinner /></Pantalla>;
-  }
+  if (dbUser === undefined) return <Pantalla><Spinner /></Pantalla>;
 
-  // Autenticado pero no registrado → Formulario de registro
+  // Formulario de registro (primer acceso)
   if (!dbUser) {
     return (
       <div style={estilos.loginContenedor}>
@@ -141,10 +160,15 @@ export default function FidelizacionPage() {
           <div style={estilos.loginLogo}>✦ fiel</div>
           <h1 style={estilos.loginTitulo}>¡Bienvenida!</h1>
           <p style={estilos.loginDesc}>
-            Completa tu perfil para activar tu tarjeta y recibir <strong style={{ color: '#e8c4a0' }}>200 puntos de bienvenida</strong>.
+            Completa tu perfil para activar tu tarjeta y recibir{' '}
+            <strong style={{ color: '#e8c4a0' }}>
+              {PTS_BIENVENIDA} punto de bienvenida
+            </strong>.
           </p>
 
           <form onSubmit={handleRegistro}>
+
+            {/* Nombre */}
             <label style={estilos.label}>Tu nombre</label>
             <input
               style={estilos.input}
@@ -156,18 +180,53 @@ export default function FidelizacionPage() {
               autoFocus
             />
 
+            {/* Email (solo lectura) */}
             <div style={estilos.emailMostrado}>
               📧 {authUser.email}
             </div>
+
+            {/* Cumpleaños (opcional) */}
+            <label style={estilos.label}>
+              🎂 Tu cumpleaños{' '}
+              <span style={{ color: '#555', fontWeight: 400 }}>— opcional · gana +1 pt en tu mes</span>
+            </label>
+            <input
+              style={{
+                ...estilos.input,
+                textAlign:    'center',
+                fontSize:     20,
+                letterSpacing: 4,
+                fontWeight:   700,
+                borderColor:  cumpleError ? '#e8605a' : '#333',
+              }}
+              type="text"
+              placeholder="DD/MM"
+              value={cumple}
+              onChange={handleCumpleChange}
+              maxLength={5}
+              inputMode="numeric"
+            />
+            {cumpleError && (
+              <div style={{ fontSize: 11, color: '#e8605a', marginTop: -8, marginBottom: 12, textAlign: 'left' }}>
+                {cumpleError}
+              </div>
+            )}
+
+            {/* Nota explicativa */}
+            {cumple && !cumpleError && (
+              <div style={{ fontSize: 11, color: '#555', marginBottom: 12, textAlign: 'left' }}>
+                Solo usamos el día y mes — nunca el año 🌸
+              </div>
+            )}
 
             <button
               type="submit"
               style={{
                 ...estilos.btnGoogle,
                 background: 'linear-gradient(135deg, #c9956a, #e8c4a0)',
-                color: '#000',
-                marginTop: 8,
-                opacity: guardando ? 0.7 : 1,
+                color:       '#000',
+                marginTop:   8,
+                opacity:     guardando ? 0.7 : 1,
               }}
               disabled={guardando}
             >
@@ -175,10 +234,7 @@ export default function FidelizacionPage() {
             </button>
           </form>
 
-          <button
-            style={estilos.btnSalir}
-            onClick={() => signOut(auth)}
-          >
+          <button style={estilos.btnSalir} onClick={() => signOut(auth)}>
             Usar otra cuenta
           </button>
         </div>
@@ -186,11 +242,10 @@ export default function FidelizacionPage() {
     );
   }
 
-  // Todo OK → Mostrar tarjeta
   return <TarjetaFidelizacion uid={authUser.uid} onLogout={() => signOut(auth)} />;
 }
 
-// ── Componentes auxiliares ─────────────────────────────────────────────────
+// ── Auxiliares ─────────────────────────────────────────────────────────────
 function Pantalla({ children }) {
   return (
     <div style={{ minHeight: '100vh', background: '#0d0d0d', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -200,7 +255,7 @@ function Pantalla({ children }) {
 }
 
 function Spinner() {
-  return <div style={{ color: '#e8c4a0', fontSize: 32 }}>✦</div>;
+  return <div style={{ color: '#e8c4a0', fontSize: 32, animation: 'spin 2s linear infinite' }}>✦</div>;
 }
 
 function GoogleIcon() {
@@ -217,87 +272,90 @@ function GoogleIcon() {
 // ── Estilos ────────────────────────────────────────────────────────────────
 const estilos = {
   loginContenedor: {
-    minHeight: '100vh',
-    background: '#0d0d0d',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 20,
+    minHeight:       '100vh',
+    background:      '#0d0d0d',
+    display:         'flex',
+    alignItems:      'center',
+    justifyContent:  'center',
+    padding:         20,
   },
   loginCard: {
-    background: '#151515',
-    border: '1px solid #222',
-    borderRadius: 24,
-    padding: '40px 32px',
-    maxWidth: 380,
-    width: '100%',
-    textAlign: 'center',
+    background:    '#151515',
+    border:        '1px solid #222',
+    borderRadius:  24,
+    padding:       '40px 32px',
+    maxWidth:      380,
+    width:         '100%',
+    textAlign:     'center',
   },
   loginLogo: {
-    fontSize: 28,
-    fontWeight: 800,
-    color: '#e8c4a0',
+    fontSize:     28,
+    fontWeight:   800,
+    color:        '#e8c4a0',
     marginBottom: 24,
     letterSpacing: 2,
   },
   loginTitulo: {
-    color: '#fff',
-    fontSize: 22,
-    fontWeight: 700,
-    margin: '0 0 12px',
+    color:        '#fff',
+    fontSize:     22,
+    fontWeight:   700,
+    margin:       '0 0 12px',
   },
   loginDesc: {
-    color: '#666',
-    fontSize: 14,
-    lineHeight: 1.6,
-    marginBottom: 24,
+    color:         '#666',
+    fontSize:      14,
+    lineHeight:    1.6,
+    marginBottom:  24,
   },
   label: {
-    display: 'block',
-    fontSize: 12,
-    color: '#888',
+    display:      'block',
+    fontSize:     12,
+    color:        '#888',
     marginBottom: 6,
-    textAlign: 'left',
+    textAlign:    'left',
   },
   input: {
-    width: '100%',
-    background: '#1a1a1a',
-    border: '1px solid #333',
+    width:        '100%',
+    background:   '#1a1a1a',
+    border:       '1px solid #333',
     borderRadius: 12,
-    padding: '14px 16px',
-    color: '#fff',
-    fontSize: 15,
+    padding:      '14px 16px',
+    color:        '#fff',
+    fontSize:     15,
     marginBottom: 12,
-    boxSizing: 'border-box',
-    outline: 'none',
+    boxSizing:    'border-box',
+    outline:      'none',
+    fontFamily:   'inherit',
   },
   emailMostrado: {
-    fontSize: 12,
-    color: '#444',
+    fontSize:     12,
+    color:        '#444',
     marginBottom: 16,
-    textAlign: 'left',
+    textAlign:    'left',
   },
   btnGoogle: {
-    width: '100%',
-    background: '#fff',
-    color: '#000',
-    border: 'none',
-    borderRadius: 12,
-    padding: '14px 20px',
-    fontSize: 15,
-    fontWeight: 600,
-    cursor: 'pointer',
-    display: 'flex',
-    alignItems: 'center',
+    width:          '100%',
+    background:     '#fff',
+    color:          '#000',
+    border:         'none',
+    borderRadius:   12,
+    padding:        '14px 20px',
+    fontSize:       15,
+    fontWeight:     600,
+    cursor:         'pointer',
+    display:        'flex',
+    alignItems:     'center',
     justifyContent: 'center',
+    fontFamily:     'inherit',
   },
   btnSalir: {
-    marginTop: 16,
-    background: 'transparent',
-    border: 'none',
-    color: '#444',
-    fontSize: 12,
-    cursor: 'pointer',
+    marginTop:      16,
+    background:     'transparent',
+    border:         'none',
+    color:          '#444',
+    fontSize:       12,
+    cursor:         'pointer',
     textDecoration: 'underline',
+    fontFamily:     'inherit',
   },
 };

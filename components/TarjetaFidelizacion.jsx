@@ -15,6 +15,7 @@ import {
   getUsuario, getHistorialPuntos, canjearRecompensa,
   crearAccionPendiente, generarLinkReferido,
   guardarFechaNacimiento, verificarCumpleanos,
+  getSkinDiagnosis, getElitePrizeLabel,
   NIVELES, TOTAL_SELLOS, REGLA_COMPRA,
 } from '../lib/puntos';
 import { C } from '@/lib/colores'; // FIX 1: importar paleta compartida
@@ -101,9 +102,24 @@ function SelloRutina({ paso, activo, numero }) {
 }
 
 // ─── Modal selección de premio ────────────────────────────────────────────────
-function ModalPremio({ nivel, onConfirmar, onCerrar, canjeando }) {
+function ModalPremio({ nivel, onConfirmar, onCerrar, canjeando, skinDiagnosis }) {
   const [seleccion, setSeleccion] = useState(null);
   const t = TIER_COLORS[nivel.tier] || TIER_COLORS.bronze;
+  const isElite = nivel.tier === 'gold';
+
+  // Para nivel Elite: personalizar labels con diagnóstico de piel
+  const opcionesPersonalizadas = nivel.opciones.map(op => {
+    if (op.requiere_skin_ia && skinDiagnosis) {
+      return {
+        ...op,
+        label: getElitePrizeLabel(skinDiagnosis),
+        desc: `${op.desc} — personalizado para piel ${skinDiagnosis}`,
+      };
+    }
+    return op;
+  });
+
+  const opcionSeleccionada = opcionesPersonalizadas.find(o => o.id === seleccion);
 
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(45,27,46,0.55)', backdropFilter: 'blur(12px)', display: 'flex', alignItems: 'flex-end', zIndex: 300 }} onClick={onCerrar}>
@@ -115,9 +131,14 @@ function ModalPremio({ nivel, onConfirmar, onCerrar, canjeando }) {
           </div>
           <div style={{ fontSize: 20, fontWeight: 700, color: C.text, fontFamily: "'Playfair Display', serif", marginBottom: 4 }}>Elige tu recompensa</div>
           <div style={{ fontSize: 13, color: C.textSoft }}>{nivel.pregunta}</div>
+          {isElite && skinDiagnosis && (
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 5, marginTop: 8, background: 'linear-gradient(135deg,#FFF8E8,#FFF0D0)', border: '1px solid #FFD700', borderRadius: 99, padding: '4px 12px', fontSize: 11, fontWeight: 600, color: '#9A6F00' }}>
+              ✨ Personalizado para piel {skinDiagnosis}
+            </div>
+          )}
         </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 18 }}>
-          {nivel.opciones.map(opcion => {
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 14 }}>
+          {opcionesPersonalizadas.map(opcion => {
             const elegida = seleccion === opcion.id;
             return (
               <div key={opcion.id} onClick={() => setSeleccion(opcion.id)}
@@ -126,6 +147,11 @@ function ModalPremio({ nivel, onConfirmar, onCerrar, canjeando }) {
                 <div style={{ flex: 1 }}>
                   <div style={{ fontSize: 15, fontWeight: 700, color: C.text, marginBottom: 2 }}>{opcion.label}</div>
                   <div style={{ fontSize: 12, color: C.textSoft }}>{opcion.desc}</div>
+                  {opcion.valor_estimado && (
+                    <div style={{ fontSize: 11, fontWeight: 700, color: '#3A9E78', marginTop: 4 }}>
+                      🏷️ Valor estimado del regalo: ${opcion.valor_estimado.toLocaleString('es-CL')}
+                    </div>
+                  )}
                 </div>
                 <div style={{ width: 22, height: 22, borderRadius: '50%', border: `2px solid ${elegida ? C.roseDark : C.border}`, background: elegida ? C.roseDark : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, transition: 'all 0.2s' }}>
                   {elegida && <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#fff' }} />}
@@ -134,6 +160,16 @@ function ModalPremio({ nivel, onConfirmar, onCerrar, canjeando }) {
             );
           })}
         </div>
+
+        {/* Badge de valor estimado para la opción seleccionada */}
+        {opcionSeleccionada?.valor_estimado && (
+          <div style={{ background: 'linear-gradient(135deg,#F0FFF8,#E8F8F0)', border: '1.5px solid #3A9E78', borderRadius: 14, padding: '10px 16px', marginBottom: 14, textAlign: 'center' }}>
+            <div style={{ fontSize: 12, color: '#3A9E78', fontWeight: 700 }}>
+              🎁 Valor estimado del regalo: ${opcionSeleccionada.valor_estimado.toLocaleString('es-CL')} — ¡Disfrútalo por ser cliente fiel!
+            </div>
+          </div>
+        )}
+
         <button onClick={() => seleccion && onConfirmar(seleccion)} disabled={!seleccion || canjeando}
           style={{ width: '100%', background: seleccion ? `linear-gradient(135deg,${C.rose},${C.roseDark})` : C.border, color: seleccion ? '#fff' : C.textSoft, border: 'none', borderRadius: 16, padding: 15, fontSize: 15, fontWeight: 700, cursor: seleccion && !canjeando ? 'pointer' : 'not-allowed', boxShadow: seleccion ? `0 6px 20px rgba(217,96,122,0.3)` : 'none', transition: 'all 0.2s', fontFamily: 'inherit' }}>
           {canjeando ? 'Canjeando...' : seleccion ? 'Confirmar elección ✦' : 'Elige una opción primero'}
@@ -413,6 +449,7 @@ export default function TarjetaFidelizacion({ uid, onLogout }) {
   const [pwaInstalada,   setPwaInstalada]   = useState(false);
   const [modalPwa,       setModalPwa]       = useState(false);
   const [isIos,          setIsIos]          = useState(false);
+  const [skinDiagnosis,  setSkinDiagnosis]  = useState(null); // tipo de piel del Analizador
 
   useEffect(() => {
     const ios = /iphone|ipad|ipod/i.test(navigator.userAgent);
@@ -444,10 +481,15 @@ export default function TarjetaFidelizacion({ uid, onLogout }) {
   async function cargarDatos(cancelled = false) {
     setCargando(true);
     try {
-      const [user, hist] = await Promise.all([getUsuario(uid), getHistorialPuntos(uid, 10)]);
+      const [user, hist, tipoPiel] = await Promise.all([
+        getUsuario(uid),
+        getHistorialPuntos(uid, 10),
+        getSkinDiagnosis(uid),
+      ]);
       if (cancelled) return;
       setUsuario(user);
       setHistorial(hist);
+      setSkinDiagnosis(tipoPiel);
       setLinkReferido(generarLinkReferido(uid));
 
       // Verificar cumpleaños
@@ -661,9 +703,9 @@ export default function TarjetaFidelizacion({ uid, onLogout }) {
                 : urgente
                   ? `🔥 Estás a ${accionesFaltantes(ptsFaltan)} de tu premio`
                   : pts >= 8
-                    ? '💖 Te acercas a 20% OFF + regalo exclusivo'
+                    ? '✨ Tu Moonbow Box exclusiva está casi lista'
                     : pts >= 5
-                      ? '🏷️ ¡Ya tienes 10% OFF disponible!'
+                      ? '🎁 ¡Ya tienes tu Kit de Muestras disponible!'
                       : proxNivel
                         ? `🎁 Desbloquea ${proxNivel.opciones[0].label} con ${ptsFaltan.toFixed(1)} pts más`
                         : ''}
@@ -951,6 +993,11 @@ export default function TarjetaFidelizacion({ uid, onLogout }) {
                         <div key={op.id} style={{ flex: 1, background: desbloqueado ? C.white : `${C.border}40`, borderRadius: 12, padding: '10px 8px', textAlign: 'center', border: `1px solid ${desbloqueado ? C.border : 'transparent'}` }}>
                           <div style={{ fontSize: 20, marginBottom: 4 }}>{op.emoji}</div>
                           <div style={{ fontSize: 11, fontWeight: 600, color: desbloqueado ? C.text : C.textSoft }}>{op.label}</div>
+                          {op.valor_estimado && desbloqueado && (
+                            <div style={{ fontSize: 9, color: '#3A9E78', fontWeight: 700, marginTop: 2 }}>
+                              val. ${op.valor_estimado.toLocaleString('es-CL')}
+                            </div>
+                          )}
                         </div>
                       ))}
                     </div>
@@ -1017,7 +1064,7 @@ export default function TarjetaFidelizacion({ uid, onLogout }) {
 
       {/* Modales */}
       {modalSolicitud && <ModalSolicitud tipo={modalSolicitud} enviando={enviando} onConfirmar={handleConfirmarSolicitud} onCerrar={() => setModalSolicitud(null)} />}
-      {modalPremio    && <ModalPremio    nivel={modalPremio}    canjeando={canjeando} onConfirmar={handleConfirmarPremio}  onCerrar={() => setModalPremio(null)} />}
+      {modalPremio    && <ModalPremio    nivel={modalPremio}    canjeando={canjeando} onConfirmar={handleConfirmarPremio}  onCerrar={() => setModalPremio(null)} skinDiagnosis={skinDiagnosis} />}
       {modalCodigo    && <ModalCodigo    codigo={modalCodigo.codigo} opcion={modalCodigo.opcion} onCerrar={() => { setModalCodigo(null); setVista('tarjeta'); }} />}
       {modalCumple    && <ModalCumpleanos fechaActual={usuario.perfil?.fecha_nacimiento} onGuardar={handleGuardarCumpleanos} onCerrar={() => setModalCumple(false)} guardando={guardandoCumple} />}
       {modalPwa       && <ModalPwaInstall isIos={isIos} onInstalar={instalarPwa} onCerrar={() => setModalPwa(false)} />}
