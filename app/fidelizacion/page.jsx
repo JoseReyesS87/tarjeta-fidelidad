@@ -3,44 +3,56 @@
 
 import { useState, useEffect } from 'react';
 import { auth, db } from '@/lib/firebase';
-import { GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut } from 'firebase/auth';
-import { doc, setDoc, serverTimestamp, addDoc, collection } from 'firebase/firestore';
+import {
+  GoogleAuthProvider,
+  signInWithRedirect,
+  getRedirectResult,
+  onAuthStateChanged,
+  signOut,
+} from 'firebase/auth';
+import { addDoc, collection, serverTimestamp } from 'firebase/firestore';
 import { getUsuario } from '@/lib/puntos';
 import TarjetaFidelizacion from '@/components/TarjetaFidelizacion';
 
-const PTS_BIENVENIDA = 1; // puntos reales que se otorgan al registrarse
+const PTS_BIENVENIDA = 1;
 
 export default function FidelizacionPage() {
-  const [authUser, setAuthUser]   = useState(undefined);
-  const [dbUser,   setDbUser]     = useState(undefined);
-  const [nombre,   setNombre]     = useState('');
-  const [cumple,   setCumple]     = useState('');   // DD/MM
-  const [guardando, setGuardando] = useState(false);
+  const [authUser,    setAuthUser]    = useState(undefined);
+  const [dbUser,      setDbUser]      = useState(undefined);
+  const [nombre,      setNombre]      = useState('');
+  const [cumple,      setCumple]      = useState('');
+  const [guardando,   setGuardando]   = useState(false);
   const [cumpleError, setCumpleError] = useState('');
 
+  // ── Auth: escuchar sesión + capturar resultado del redirect ───────────────
   useEffect(() => {
+    // Capturar el resultado del redirect de Google (si venimos de uno)
+    getRedirectResult(auth).catch(() => {});
+
     const unsub = onAuthStateChanged(auth, async (user) => {
-      setAuthUser(user);
+      setAuthUser(user ?? null);
       if (user) {
-        const data = await getUsuario(user.uid);
-        setDbUser(data);
+        // Buscar por uid (campo), no por ID de documento
+        const data = await getUsuario(user.uid, user.email);
+        setDbUser(data ?? null);
       } else {
-        setDbUser(undefined);
+        setDbUser(null);
       }
     });
     return () => unsub();
   }, []);
 
+  // FIX: signInWithRedirect en lugar de signInWithPopup
+  // signInWithPopup falla en Vercel por Cross-Origin-Opener-Policy headers
   async function handleLogin() {
     const provider = new GoogleAuthProvider();
     try {
-      await signInWithPopup(auth, provider);
+      await signInWithRedirect(auth, provider);
     } catch (e) {
       console.error('Error al iniciar sesión:', e);
     }
   }
 
-  // Formatear cumpleaños: auto-inserta "/" después de los dos primeros dígitos
   function handleCumpleChange(e) {
     setCumpleError('');
     let v = e.target.value.replace(/[^0-9/]/g, '');
@@ -50,7 +62,7 @@ export default function FidelizacionPage() {
   }
 
   function validarCumple(val) {
-    if (!val) return true; // es opcional
+    if (!val) return true;
     if (val.length !== 5 || !val.includes('/')) return false;
     const [dd, mm] = val.split('/').map(Number);
     if (mm < 1 || mm > 12) return false;
@@ -78,7 +90,12 @@ export default function FidelizacionPage() {
       };
       if (cumple) perfil.fecha_nacimiento = cumple;
 
-      await setDoc(doc(db, 'usuarios', authUser.uid), {
+      // FIX CRÍTICO: addDoc (ID automático) en lugar de setDoc con authUser.uid
+      // Tu Firestore usa IDs automáticos — setDoc con el UID fallaba porque
+      // la regla allow update exige que resource.data.uid == request.auth.uid,
+      // pero el documento no existía con ese ID → "insufficient permissions"
+      await addDoc(collection(db, 'usuarios'), {
+        uid: authUser.uid,       // campo uid para que las reglas y queries funcionen
         perfil,
         lealtad: {
           puntos:                  PTS_BIENVENIDA,
@@ -93,10 +110,17 @@ export default function FidelizacionPage() {
           canal_registro:     'web',
           referido_por:       refUid || null,
         },
+        acciones_realizadas: {
+          bienvenida: serverTimestamp(), // marcar para no dar el punto dos veces
+        },
       });
 
-      // Transacción de bienvenida
-      await addDoc(collection(db, 'usuarios', authUser.uid, 'transacciones_lealtad'), {
+      // Buscar el documento recién creado para obtener su docId real
+      const data = await getUsuario(authUser.uid, authUser.email);
+      if (!data) throw new Error('No se pudo obtener el usuario recién creado');
+
+      // Transacción de bienvenida en la sub-colección correcta
+      await addDoc(collection(db, 'usuarios', data.id, 'transacciones_lealtad'), {
         tipo:             'earn',
         motivo:           'bienvenida',
         puntos:           PTS_BIENVENIDA,
@@ -119,7 +143,6 @@ export default function FidelizacionPage() {
         });
       }
 
-      const data = await getUsuario(authUser.uid);
       setDbUser(data);
     } catch (err) {
       console.error('Error al registrar:', err);
@@ -130,7 +153,9 @@ export default function FidelizacionPage() {
 
   // ── Estados de UI ──────────────────────────────────────────────────────────
 
-  if (authUser === undefined) return <Pantalla><Spinner /></Pantalla>;
+  if (authUser === undefined || (authUser && dbUser === undefined)) {
+    return <Pantalla><Spinner /></Pantalla>;
+  }
 
   if (!authUser) {
     return (
@@ -150,25 +175,21 @@ export default function FidelizacionPage() {
     );
   }
 
-  if (dbUser === undefined) return <Pantalla><Spinner /></Pantalla>;
-
   // Formulario de registro (primer acceso)
   if (!dbUser) {
     return (
       <div style={estilos.loginContenedor}>
         <div style={estilos.loginCard}>
-          <div style={estilos.loginLogo}>✦ Moonbow</div>
+          <div style={estilos.loginLogo}>✦ fiel</div>
           <h1 style={estilos.loginTitulo}>¡Bienvenida!</h1>
           <p style={estilos.loginDesc}>
-            Completa tu perfil para activar tu tarjeta y comenzar a
+            Completa tu perfil para activar tu tarjeta y recibir{' '}
             <strong style={{ color: '#e8c4a0' }}>
-              {PTS_BIENVENIDA} Ganar Puntos
+              {PTS_BIENVENIDA} punto de bienvenida
             </strong>.
           </p>
 
           <form onSubmit={handleRegistro}>
-
-            {/* Nombre */}
             <label style={estilos.label}>Tu nombre</label>
             <input
               style={estilos.input}
@@ -180,12 +201,10 @@ export default function FidelizacionPage() {
               autoFocus
             />
 
-            {/* Email (solo lectura) */}
             <div style={estilos.emailMostrado}>
               📧 {authUser.email}
             </div>
 
-            {/* Cumpleaños (opcional) */}
             <label style={estilos.label}>
               🎂 Tu cumpleaños{' '}
               <span style={{ color: '#555', fontWeight: 400 }}>— opcional · gana +1 pt en tu mes</span>
@@ -193,11 +212,11 @@ export default function FidelizacionPage() {
             <input
               style={{
                 ...estilos.input,
-                textAlign:    'center',
-                fontSize:     20,
+                textAlign:     'center',
+                fontSize:      20,
                 letterSpacing: 4,
-                fontWeight:   700,
-                borderColor:  cumpleError ? '#e8605a' : '#333',
+                fontWeight:    700,
+                borderColor:   cumpleError ? '#e8605a' : '#333',
               }}
               type="text"
               placeholder="DD/MM"
@@ -211,8 +230,6 @@ export default function FidelizacionPage() {
                 {cumpleError}
               </div>
             )}
-
-            {/* Nota explicativa */}
             {cumple && !cumpleError && (
               <div style={{ fontSize: 11, color: '#555', marginBottom: 12, textAlign: 'left' }}>
                 Solo usamos el día y mes — nunca el año 🌸
@@ -224,9 +241,9 @@ export default function FidelizacionPage() {
               style={{
                 ...estilos.btnGoogle,
                 background: 'linear-gradient(135deg, #c9956a, #e8c4a0)',
-                color:       '#000',
-                marginTop:   8,
-                opacity:     guardando ? 0.7 : 1,
+                color:      '#000',
+                marginTop:  8,
+                opacity:    guardando ? 0.7 : 1,
               }}
               disabled={guardando}
             >
@@ -255,7 +272,7 @@ function Pantalla({ children }) {
 }
 
 function Spinner() {
-  return <div style={{ color: '#e8c4a0', fontSize: 32, animation: 'spin 2s linear infinite' }}>✦</div>;
+  return <div style={{ color: '#e8c4a0', fontSize: 32 }}>✦</div>;
 }
 
 function GoogleIcon() {
@@ -272,27 +289,27 @@ function GoogleIcon() {
 // ── Estilos ────────────────────────────────────────────────────────────────
 const estilos = {
   loginContenedor: {
-    minHeight:       '100vh',
-    background:      '#0d0d0d',
-    display:         'flex',
-    alignItems:      'center',
-    justifyContent:  'center',
-    padding:         20,
+    minHeight:      '100vh',
+    background:     '#0d0d0d',
+    display:        'flex',
+    alignItems:     'center',
+    justifyContent: 'center',
+    padding:        20,
   },
   loginCard: {
-    background:    '#151515',
-    border:        '1px solid #222',
-    borderRadius:  24,
-    padding:       '40px 32px',
-    maxWidth:      380,
-    width:         '100%',
-    textAlign:     'center',
+    background:   '#151515',
+    border:       '1px solid #222',
+    borderRadius: 24,
+    padding:      '40px 32px',
+    maxWidth:     380,
+    width:        '100%',
+    textAlign:    'center',
   },
   loginLogo: {
-    fontSize:     28,
-    fontWeight:   800,
-    color:        '#e8c4a0',
-    marginBottom: 24,
+    fontSize:      28,
+    fontWeight:    800,
+    color:         '#e8c4a0',
+    marginBottom:  24,
     letterSpacing: 2,
   },
   loginTitulo: {
@@ -302,10 +319,10 @@ const estilos = {
     margin:       '0 0 12px',
   },
   loginDesc: {
-    color:         '#666',
-    fontSize:      14,
-    lineHeight:    1.6,
-    marginBottom:  24,
+    color:        '#666',
+    fontSize:     14,
+    lineHeight:   1.6,
+    marginBottom: 24,
   },
   label: {
     display:      'block',
