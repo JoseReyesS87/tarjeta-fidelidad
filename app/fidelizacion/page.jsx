@@ -136,7 +136,7 @@ export default function FidelizacionPage() {
     return (
       <div style={estilos.loginContenedor}>
         <div style={estilos.loginCard}>
-          <div style={estilos.loginLogo}>✦ fiel</div>
+          <div style={estilos.loginLogo}>✦ Moonbow</div>
           <h1 style={estilos.loginTitulo}>Tu tarjeta de puntos</h1>
           <p style={estilos.loginDesc}>
             Acumula puntos en cada compra y canjéalos por productos y descuentos exclusivos.
