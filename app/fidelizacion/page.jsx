@@ -157,12 +157,12 @@ export default function FidelizacionPage() {
     return (
       <div style={estilos.loginContenedor}>
         <div style={estilos.loginCard}>
-          <div style={estilos.loginLogo}>✦ fiel</div>
+          <div style={estilos.loginLogo}>✦ Moonbow</div>
           <h1 style={estilos.loginTitulo}>¡Bienvenida!</h1>
           <p style={estilos.loginDesc}>
-            Completa tu perfil para activar tu tarjeta y recibir{' '}
+            Completa tu perfil para activar tu tarjeta y comenzar a
             <strong style={{ color: '#e8c4a0' }}>
-              {PTS_BIENVENIDA} punto de bienvenida
+              {PTS_BIENVENIDA} Ganar Puntos
             </strong>.
           </p>
 
