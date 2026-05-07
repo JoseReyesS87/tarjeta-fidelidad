@@ -5,8 +5,7 @@ import { useState, useEffect } from 'react';
 import { auth, db } from '@/lib/firebase';
 import {
   GoogleAuthProvider,
-  signInWithRedirect,
-  getRedirectResult,
+  signInWithPopup,
   onAuthStateChanged,
   signOut,
 } from 'firebase/auth';
@@ -24,53 +23,29 @@ export default function FidelizacionPage() {
   const [guardando,   setGuardando]   = useState(false);
   const [cumpleError, setCumpleError] = useState('');
 
-  // ── Auth: escuchar sesión + capturar resultado del redirect ───────────────
   useEffect(() => {
-    let unsubscribed = false;
-
-    async function init() {
-      // Primero intentar capturar el resultado del redirect.
-      // getRedirectResult resuelve con null si no venimos de un redirect,
-      // o con el UserCredential si Google acaba de autenticarnos.
-      try {
-        await getRedirectResult(auth);
-      } catch (e) {
-        console.error('getRedirectResult error:', e);
+    let cancelled = false;
+    const unsub = onAuthStateChanged(auth, async (user) => {
+      if (cancelled) return;
+      setAuthUser(user ?? null);
+      if (user) {
+        const data = await getUsuario(user.uid, user.email);
+        if (!cancelled) setDbUser(data ?? null);
+      } else {
+        setDbUser(null);
       }
-
-      // Después de resolver el redirect, escuchar cambios de auth.
-      // En este punto Firebase ya habrá persistido la sesión del redirect.
-      const unsub = onAuthStateChanged(auth, async (user) => {
-        if (unsubscribed) return;
-        setAuthUser(user ?? null);
-        if (user) {
-          const data = await getUsuario(user.uid, user.email);
-          if (!unsubscribed) setDbUser(data ?? null);
-        } else {
-          setDbUser(null);
-        }
-      });
-
-      return unsub;
-    }
-
-    let cleanup = () => {};
-    init().then(unsub => { if (unsub) cleanup = unsub; });
-
-    return () => {
-      unsubscribed = true;
-      cleanup();
-    };
+    });
+    return () => { cancelled = true; unsub(); };
   }, []);
 
-  // FIX: signInWithRedirect en lugar de signInWithPopup
-  // signInWithPopup falla en Vercel por Cross-Origin-Opener-Policy headers
   async function handleLogin() {
     const provider = new GoogleAuthProvider();
     try {
-      await signInWithRedirect(auth, provider);
+      await signInWithPopup(auth, provider);
     } catch (e) {
-      console.error('Error al iniciar sesión:', e);
+      if (e.code !== 'auth/popup-closed-by-user') {
+        console.error('Error al iniciar sesión:', e);
+      }
     }
   }
 
@@ -105,18 +80,11 @@ export default function FidelizacionPage() {
       const params = new URLSearchParams(window.location.search);
       const refUid = params.get('ref');
 
-      const perfil = {
-        nombre: nombre.trim(),
-        email:  authUser.email,
-      };
+      const perfil = { nombre: nombre.trim(), email: authUser.email };
       if (cumple) perfil.fecha_nacimiento = cumple;
 
-      // FIX CRÍTICO: addDoc (ID automático) en lugar de setDoc con authUser.uid
-      // Tu Firestore usa IDs automáticos — setDoc con el UID fallaba porque
-      // la regla allow update exige que resource.data.uid == request.auth.uid,
-      // pero el documento no existía con ese ID → "insufficient permissions"
       await addDoc(collection(db, 'usuarios'), {
-        uid: authUser.uid,       // campo uid para que las reglas y queries funcionen
+        uid: authUser.uid,
         perfil,
         lealtad: {
           puntos:                  PTS_BIENVENIDA,
@@ -132,15 +100,13 @@ export default function FidelizacionPage() {
           referido_por:       refUid || null,
         },
         acciones_realizadas: {
-          bienvenida: serverTimestamp(), // marcar para no dar el punto dos veces
+          bienvenida: serverTimestamp(),
         },
       });
 
-      // Buscar el documento recién creado para obtener su docId real
       const data = await getUsuario(authUser.uid, authUser.email);
       if (!data) throw new Error('No se pudo obtener el usuario recién creado');
 
-      // Transacción de bienvenida en la sub-colección correcta
       await addDoc(collection(db, 'usuarios', data.id, 'transacciones_lealtad'), {
         tipo:             'earn',
         motivo:           'bienvenida',
@@ -155,7 +121,6 @@ export default function FidelizacionPage() {
         },
       });
 
-      // Puntos al referidor
       if (refUid) {
         const { agregarPuntos } = await import('@/lib/puntos');
         await agregarPuntos(refUid, 'referido', {
@@ -171,8 +136,6 @@ export default function FidelizacionPage() {
       setGuardando(false);
     }
   }
-
-  // ── Estados de UI ──────────────────────────────────────────────────────────
 
   if (authUser === undefined || (authUser && dbUser === undefined)) {
     return <Pantalla><Spinner /></Pantalla>;
@@ -196,7 +159,6 @@ export default function FidelizacionPage() {
     );
   }
 
-  // Formulario de registro (primer acceso)
   if (!dbUser) {
     return (
       <div style={estilos.loginContenedor}>
@@ -205,9 +167,7 @@ export default function FidelizacionPage() {
           <h1 style={estilos.loginTitulo}>¡Bienvenida!</h1>
           <p style={estilos.loginDesc}>
             Completa tu perfil para activar tu tarjeta y recibir{' '}
-            <strong style={{ color: '#e8c4a0' }}>
-              {PTS_BIENVENIDA} punto de bienvenida
-            </strong>.
+            <strong style={{ color: '#e8c4a0' }}>{PTS_BIENVENIDA} punto de bienvenida</strong>.
           </p>
 
           <form onSubmit={handleRegistro}>
@@ -222,9 +182,7 @@ export default function FidelizacionPage() {
               autoFocus
             />
 
-            <div style={estilos.emailMostrado}>
-              📧 {authUser.email}
-            </div>
+            <div style={estilos.emailMostrado}>📧 {authUser.email}</div>
 
             <label style={estilos.label}>
               🎂 Tu cumpleaños{' '}
@@ -283,7 +241,6 @@ export default function FidelizacionPage() {
   return <TarjetaFidelizacion uid={authUser.uid} onLogout={() => signOut(auth)} />;
 }
 
-// ── Auxiliares ─────────────────────────────────────────────────────────────
 function Pantalla({ children }) {
   return (
     <div style={{ minHeight: '100vh', background: '#0d0d0d', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -307,7 +264,6 @@ function GoogleIcon() {
   );
 }
 
-// ── Estilos ────────────────────────────────────────────────────────────────
 const estilos = {
   loginContenedor: {
     minHeight:      '100vh',
