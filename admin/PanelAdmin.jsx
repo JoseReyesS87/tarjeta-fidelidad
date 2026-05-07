@@ -4,7 +4,7 @@
 import { useState, useEffect } from 'react';
 import {
   getAccionesPendientes, aprobarAccion, rechazarAccion,
-  agregarPuntos, restarPuntos, getTopClientes, getUsuario, ACCIONES
+  agregarPuntosConDocId, restarPuntosConDocId, getTopClientes, getUsuario, ACCIONES
 } from '../lib/puntos';
 import { collection, query, where, orderBy, limit, getDocs, doc, updateDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
@@ -137,8 +137,10 @@ export default function PanelAdmin({ adminUid }) {
   // ── AGREGAR puntos (admin siempre omite límite) ──────────────────────────────
   async function handleAgregarPuntosManual() {
     if (!usuarioFound) return;
+    const docId = usuarioFound.id;
+    if (!docId) { mostrarMensaje('Error: no se pudo determinar el documento del usuario'); return; }
     try {
-      await agregarPuntos(usuarioFound.uid, accionManual, {
+      await agregarPuntosConDocId(docId, accionManual, {
         monto:         montoManual ? parseInt(montoManual) : null,
         aprobado_por:  adminUid,
         omitir_limite: true,
@@ -156,8 +158,10 @@ export default function PanelAdmin({ adminUid }) {
     if (!usuarioFound || !puntosCustom) return;
     const pts = parseFloat(puntosCustom);
     if (isNaN(pts) || pts <= 0) { mostrarMensaje('Ingresa un número válido'); return; }
+    const uid = usuarioFound.uid || usuarioFound.perfil?.uid || usuarioFound.id;
+    if (!uid) { mostrarMensaje('Error: no se pudo determinar el UID del usuario'); return; }
     try {
-      await restarPuntos(usuarioFound.uid, pts, 'ajuste_admin', {
+      await restarPuntosConDocId(usuarioFound.id, pts, 'ajuste_admin', {
         descripcion:  `Ajuste manual por admin`,
         aprobado_por: adminUid,
       });
