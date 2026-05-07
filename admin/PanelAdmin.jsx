@@ -6,7 +6,7 @@ import {
   getAccionesPendientes, aprobarAccion, rechazarAccion,
   agregarPuntos, restarPuntos, getTopClientes, getUsuario, ACCIONES
 } from '../lib/puntos';
-import { collection, query, orderBy, limit, getDocs, doc, updateDoc } from 'firebase/firestore';
+import { collection, query, where, orderBy, limit, getDocs, doc, updateDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 
 const C = {
@@ -55,7 +55,8 @@ export default function PanelAdmin({ adminUid }) {
 
   // Modal puntos
   const [modalPuntos, setModalPuntos]   = useState(false);
-  const [uidManual, setUidManual]       = useState('');
+  const [emailManual, setEmailManual]   = useState('');   // buscar por email
+  const [buscarError, setBuscarError]   = useState('');
   const [accionManual, setAccionManual] = useState('compra_fisica');
   const [montoManual, setMontoManual]   = useState('');
   const [puntosCustom, setPuntosCustom] = useState('');  // para restar puntos
@@ -80,18 +81,20 @@ export default function PanelAdmin({ adminUid }) {
   }
 
   function abrirModalDesdeCliente(cliente, modo = 'agregar') {
-    setUidManual(cliente.id);
+    setEmailManual(cliente.perfil?.email || '');
     setUsuarioFound(cliente);
     setModoModal(modo);
     setPuntosCustom('');
     setMontoManual('');
+    setBuscarError('');
     setModalPuntos(true);
   }
 
   function cerrarModal() {
     setModalPuntos(false);
     setUsuarioFound(null);
-    setUidManual('');
+    setEmailManual('');
+    setBuscarError('');
     setPuntosCustom('');
     setMontoManual('');
     setModoModal('agregar');
@@ -107,9 +110,27 @@ export default function PanelAdmin({ adminUid }) {
   }
 
   async function handleBuscarUsuario() {
-    if (!uidManual.trim()) return;
+    const email = emailManual.trim().toLowerCase();
+    if (!email) return;
     setBuscando(true);
-    setUsuarioFound(await getUsuario(uidManual.trim()));
+    setBuscarError('');
+    try {
+      // Buscar en Firestore por perfil.email
+      const q = query(
+        collection(db, 'usuarios'),
+        where('perfil.email', '==', email)
+      );
+      const snap = await getDocs(q);
+      if (snap.empty) {
+        setBuscarError('No se encontró ninguna clienta con ese email');
+        setUsuarioFound(null);
+      } else {
+        const d = snap.docs[0];
+        setUsuarioFound({ id: d.id, ...d.data() });
+      }
+    } catch (e) {
+      setBuscarError('Error al buscar: ' + e.message);
+    }
     setBuscando(false);
   }
 
@@ -117,10 +138,10 @@ export default function PanelAdmin({ adminUid }) {
   async function handleAgregarPuntosManual() {
     if (!usuarioFound) return;
     try {
-      await agregarPuntos(uidManual, accionManual, {
+      await agregarPuntos(usuarioFound.uid, accionManual, {
         monto:         montoManual ? parseInt(montoManual) : null,
         aprobado_por:  adminUid,
-        omitir_limite: true,   // ← admin puede siempre agregar, sin importar límites
+        omitir_limite: true,
       });
       mostrarMensaje(`✦ Puntos añadidos a ${usuarioFound.perfil?.nombre || 'cliente'}`);
       cerrarModal();
@@ -136,7 +157,7 @@ export default function PanelAdmin({ adminUid }) {
     const pts = parseFloat(puntosCustom);
     if (isNaN(pts) || pts <= 0) { mostrarMensaje('Ingresa un número válido'); return; }
     try {
-      await restarPuntos(uidManual, pts, 'ajuste_admin', {
+      await restarPuntos(usuarioFound.uid, pts, 'ajuste_admin', {
         descripcion:  `Ajuste manual por admin`,
         aprobado_por: adminUid,
       });
@@ -392,10 +413,22 @@ export default function PanelAdmin({ adminUid }) {
             {/* Buscar cliente si no viene desde la lista */}
             {!usuarioFound ? (
               <div>
-                <label style={aS.label}>UID del cliente</label>
-                <input style={aS.input} value={uidManual} onChange={e => setUidManual(e.target.value)} placeholder="UID en Firebase" />
-                <button onClick={handleBuscarUsuario} disabled={buscando} style={aS.btnSecundario}>
-                  {buscando ? 'Buscando...' : 'Buscar cliente'}
+                <label style={aS.label}>Email de la clienta</label>
+                <input
+                  style={aS.input}
+                  type="email"
+                  value={emailManual}
+                  onChange={e => { setEmailManual(e.target.value); setBuscarError(''); }}
+                  placeholder="ejemplo@gmail.com"
+                  onKeyDown={e => e.key === 'Enter' && handleBuscarUsuario()}
+                />
+                {buscarError && (
+                  <div style={{ fontSize: 12, color: '#E8857E', marginTop: -10, marginBottom: 12 }}>
+                    ⚠️ {buscarError}
+                  </div>
+                )}
+                <button onClick={handleBuscarUsuario} disabled={buscando || !emailManual.trim()} style={{ ...aS.btnSecundario, opacity: emailManual.trim() ? 1 : 0.5 }}>
+                  {buscando ? 'Buscando...' : 'Buscar clienta'}
                 </button>
               </div>
             ) : (
