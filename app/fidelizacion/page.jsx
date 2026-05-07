@@ -26,20 +26,41 @@ export default function FidelizacionPage() {
 
   // ── Auth: escuchar sesión + capturar resultado del redirect ───────────────
   useEffect(() => {
-    // Capturar el resultado del redirect de Google (si venimos de uno)
-    getRedirectResult(auth).catch(() => {});
+    let unsubscribed = false;
 
-    const unsub = onAuthStateChanged(auth, async (user) => {
-      setAuthUser(user ?? null);
-      if (user) {
-        // Buscar por uid (campo), no por ID de documento
-        const data = await getUsuario(user.uid, user.email);
-        setDbUser(data ?? null);
-      } else {
-        setDbUser(null);
+    async function init() {
+      // Primero intentar capturar el resultado del redirect.
+      // getRedirectResult resuelve con null si no venimos de un redirect,
+      // o con el UserCredential si Google acaba de autenticarnos.
+      try {
+        await getRedirectResult(auth);
+      } catch (e) {
+        console.error('getRedirectResult error:', e);
       }
-    });
-    return () => unsub();
+
+      // Después de resolver el redirect, escuchar cambios de auth.
+      // En este punto Firebase ya habrá persistido la sesión del redirect.
+      const unsub = onAuthStateChanged(auth, async (user) => {
+        if (unsubscribed) return;
+        setAuthUser(user ?? null);
+        if (user) {
+          const data = await getUsuario(user.uid, user.email);
+          if (!unsubscribed) setDbUser(data ?? null);
+        } else {
+          setDbUser(null);
+        }
+      });
+
+      return unsub;
+    }
+
+    let cleanup = () => {};
+    init().then(unsub => { if (unsub) cleanup = unsub; });
+
+    return () => {
+      unsubscribed = true;
+      cleanup();
+    };
   }, []);
 
   // FIX: signInWithRedirect en lugar de signInWithPopup
